@@ -1,68 +1,71 @@
-import type {ReactNode} from 'react';
-import clsx from 'clsx';
-import Heading from '@theme/Heading';
-import styles from './styles.module.css';
+import type { ReactNode } from "react";
+import Link from "@docusaurus/Link";
+import Heading from "@theme/Heading";
+import styles from "./styles.module.css";
 
-type FeatureItem = {
-  title: string;
-  Svg: React.ComponentType<React.ComponentProps<'svg'>>;
-  description: ReactNode;
-};
-
-const FeatureList: FeatureItem[] = [
+const topics = [
   {
-    title: 'Easy to Use',
-    Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
-    description: (
-      <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
-      </>
-    ),
+    "title": "はじめに",
+    "to": "/docs/getting-started",
+    "description": "基本用語と情報源を確認し、NEM / Symbol の学び方を見つけます。"
   },
   {
-    title: 'Focus on What Matters',
-    Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
-    description: (
-      <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
-      </>
-    ),
+    "title": "Symbol",
+    "to": "/docs/symbol",
+    "description": "Symbol 固有の仕様とアプリケーション開発を扱います。"
   },
   {
-    title: 'Powered by React',
-    Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
-    description: (
-      <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
-      </>
-    ),
+    "title": "NEM（NIS1）",
+    "to": "/docs/nem",
+    "description": "NEM（NIS1）固有の仕様とアプリケーション開発を扱います。"
   },
+  {
+    "title": "共通技術・比較",
+    "to": "/docs/common",
+    "description": "共通する技術や暗号技術を学び、NEM と Symbol の違いを整理します。"
+  },
+  {
+    "title": "ノード運用",
+    "to": "/docs/node-operation",
+    "description": "ノードの構築・保守・障害対応を扱います。"
+  },
+  {
+    "title": "プロトコル",
+    "to": "/docs/protocol",
+    "description": "P2P 通信、バイナリ形式、ファイナライズを扱います。"
+  },
+  {
+    "title": "セキュリティ",
+    "to": "/docs/security",
+    "description": "鍵管理とアプリケーション・ノードの安全性を扱います。"
+  },
+  {
+    "title": "トラブルシューティング",
+    "to": "/docs/troubleshooting",
+    "description": "問題や症状を起点に、原因の切り分けと対処方法を探します。"
+  },
+  {
+    "title": "リファレンス",
+    "to": "/docs/references",
+    "description": "API・SDK の仕様と実装、外部資料へのリンクをまとめます。"
+  }
 ];
-
-function Feature({title, Svg, description}: FeatureItem) {
-  return (
-    <div className={clsx('col col--4')}>
-      <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
-      </div>
-      <div className="text--center padding-horiz--md">
-        <Heading as="h3">{title}</Heading>
-        <p>{description}</p>
-      </div>
-    </div>
-  );
-}
 
 export default function HomepageFeatures(): ReactNode {
   return (
-    <section className={styles.features}>
+    <section className={styles.topics} aria-labelledby="topics-title">
       <div className="container">
-        <div className="row">
-          {FeatureList.map((props, idx) => (
-            <Feature key={idx} {...props} />
+        <Heading as="h2" id="topics-title">技術分野から探す</Heading>
+        <p className={styles.intro}>
+          各ページで扱うテーマと参照資料を案内しています。記事は順次整備していきます。
+        </p>
+        <div className={styles.grid}>
+          {topics.map(({ title, to, description }) => (
+            <Link className={styles.card} key={to} to={to}>
+              <Heading as="h3">{title}</Heading>
+              <p>{description}</p>
+              <span className={styles.cardAction}>{title} の入口へ →</span>
+            </Link>
           ))}
         </div>
       </div>

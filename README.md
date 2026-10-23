@@ -33,12 +33,14 @@ pnpm start
 
 主な編集先は次のとおりです。
 
-- `docs/`: Markdown / MDX のドキュメント。サイドバーはディレクトリ構造から自動生成します。
-- `blog/`: ブログ記事。
+- `docs/`: 技術分野別の Markdown / MDX ドキュメント。サイドバーはディレクトリ構造から自動生成します。
 - `src/pages/`: トップページなどの独立したページ。
 - `src/components/`、`src/css/`: 共通コンポーネントとスタイル。
 - `static/`: 画像など、そのまま配信するファイル。
 - `docusaurus.config.ts`: サイト情報、ナビゲーション、公開先などの設定。
+
+記事のカテゴリ、執筆方針、PR の送り方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+サイトの基本言語は日本語（`ja`）です。ブログ機能は現在無効にしています。
 
 ## VS Code
 

@@ -2,145 +2,87 @@ import { themes as prismThemes } from "prism-react-renderer";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
 
-// This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
+const repositoryUrl =
+  "https://github.com/nem-symbol-commons/nem-symbol-commons.github.io";
 
 const config: Config = {
   title: "NEM & Symbol Commons",
-  tagline: "NEM / Symbol Developer Documentation",
-  favicon: "img/favicon.ico",
-
-  // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
-  future: {
-    v4: true, // Improve compatibility with the upcoming Docusaurus v4
-  },
-
-  // Set the production url of your site here
+  tagline: "NEM / Symbol の開発と運用を、日本語で。",
+  favicon: "img/Symbol_NEM_Combo_Icon.png",
+  future: { v4: true },
   url: "https://nem-symbol-commons.github.io",
-  // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: "/",
-
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: "nem-symbol-commons", // Usually your GitHub org/user name.
-  projectName: "nem-symbol-commons.github.io", // Usually your repo name.
-
+  organizationName: "nem-symbol-commons",
+  projectName: "nem-symbol-commons.github.io",
   trailingSlash: false,
-
   onBrokenLinks: "throw",
-
-  // Even if you don't use internationalization, you can use this field to set
-  // useful metadata like html lang. For example, if your site is Chinese, you
-  // may want to replace "en" with "zh-Hans".
   i18n: {
-    defaultLocale: "en",
-    locales: ["en"],
+    defaultLocale: "ja",
+    locales: ["ja"],
   },
-
   presets: [
     [
       "classic",
       {
         docs: {
           sidebarPath: "./sidebars.ts",
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl:
-            "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/",
+          editUrl: `${repositoryUrl}/edit/main/`,
         },
-        blog: {
-          showReadingTime: true,
-          feedOptions: {
-            type: ["rss", "atom"],
-            xslt: true,
-          },
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl:
-            "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/",
-          // Useful options to enforce blogging best practices
-          onInlineTags: "warn",
-          onInlineAuthors: "warn",
-          onUntruncatedBlogPosts: "warn",
-        },
-        theme: {
-          customCss: "./src/css/custom.css",
-        },
+        blog: false,
+        theme: { customCss: "./src/css/custom.css" },
       } satisfies Preset.Options,
     ],
   ],
-
   themeConfig: {
-    // Replace with your project's social card
-    image: "img/docusaurus-social-card.jpg",
-    colorMode: {
-      respectPrefersColorScheme: true,
-    },
+    colorMode: { respectPrefersColorScheme: true },
     navbar: {
-      title: "My Site",
+      title: "NEM & Symbol Commons",
       logo: {
-        alt: "My Site Logo",
-        src: "img/logo.svg",
+        alt: "NEM と Symbol のコンビネーションアイコン",
+        src: "img/Symbol_NEM_Combo_Icon.png",
+        width: 32,
+        height: 32,
       },
       items: [
         {
           type: "docSidebar",
-          sidebarId: "tutorialSidebar",
+          sidebarId: "docsSidebar",
           position: "left",
-          label: "Tutorial",
+          label: "ドキュメント",
         },
-        { to: "/blog", label: "Blog", position: "left" },
         {
-          href: "https://github.com/facebook/docusaurus",
-          label: "GitHub",
+          href: `${repositoryUrl}/blob/main/CONTRIBUTING.md`,
+          label: "貢献ガイド",
           position: "right",
         },
+        { href: repositoryUrl, label: "GitHub", position: "right" },
       ],
     },
     footer: {
       style: "dark",
       links: [
         {
-          title: "Docs",
+          title: "技術分野",
           items: [
-            {
-              label: "Tutorial",
-              to: "/docs/intro",
-            },
+            { label: "NEM", to: "/docs/nem" },
+            { label: "Symbol", to: "/docs/symbol" },
+            { label: "API・SDK", to: "/docs/references" },
+            { label: "ノード運用", to: "/docs/node-operation" },
           ],
         },
         {
-          title: "Community",
+          title: "Commons に参加する",
           items: [
             {
-              label: "Stack Overflow",
-              href: "https://stackoverflow.com/questions/tagged/docusaurus",
+              label: "貢献ガイド",
+              href: `${repositoryUrl}/blob/main/CONTRIBUTING.md`,
             },
-            {
-              label: "Discord",
-              href: "https://discordapp.com/invite/docusaurus",
-            },
-            {
-              label: "X",
-              href: "https://x.com/docusaurus",
-            },
-          ],
-        },
-        {
-          title: "More",
-          items: [
-            {
-              label: "Blog",
-              to: "/blog",
-            },
-            {
-              label: "GitHub",
-              href: "https://github.com/facebook/docusaurus",
-            },
+            { label: "Issue", href: `${repositoryUrl}/issues` },
+            { label: "GitHub", href: repositoryUrl },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} My Project, Inc. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} NEM & Symbol Commons contributors. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,
