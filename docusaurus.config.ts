@@ -16,6 +16,7 @@ const config: Config = {
   projectName: "nem-symbol-commons.github.io",
   trailingSlash: false,
   onBrokenLinks: "throw",
+  plugins: ["./plugins/article-dates.ts"],
   i18n: {
     defaultLocale: "ja",
     locales: ["ja"],
