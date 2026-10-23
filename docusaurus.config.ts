@@ -29,6 +29,9 @@ const config: Config = {
           editUrl: `${repositoryUrl}/edit/main/`,
         },
         blog: false,
+        gtag: {
+          trackingID: "G-DPJ06G637R",
+        },
         theme: { customCss: "./src/css/custom.css" },
       } satisfies Preset.Options,
     ],
