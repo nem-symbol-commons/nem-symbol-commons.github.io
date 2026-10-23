@@ -1,0 +1,187 @@
+---
+title: NEMスーパーノードプログラム登録（旧手順）
+description: NIS1 スーパーノード登録の過去の運用メモ。参加条件は別途確認が必要です。
+slug: /node-operation/nem/supernode
+sidebar_position: 3
+tags:
+- NEM
+- NIS1
+- Node
+- Supernode
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+これは旧原稿に記載されていた参加手順の記録です。残高条件、報酬、募集期間、登録先、ウォレット画面は移行時に現行確認していません。現在の参加条件を確認してから利用してください。
+
+## アカウントのデリゲート有効化
+
+NEM ウォレットで「デリゲートアカウント管理」（サービス → デリゲートアカウント管理）を開きます。
+リモートステータスが「無効」の場合は、「デリゲートアカウントの有効化/無効化」ボタンを押して有効化します（手数料 0.15 XEM）。
+有効化には約 6 時間かかりますが、その間に他の作業を進めても問題ありません。
+
+## 委任秘密鍵の取得
+
+「デリゲートアカウントのキーを表示する」ボタンを押します。
+ウォレットのパスワードを入力し、＋ボタンで秘密鍵を表示します。
+
+## NIS1 クライアントに委任秘密鍵を設定
+
+### NIS1 クライアントの停止
+
+NIS1 クライアントが稼働中の場合は停止します。
+
+```bash
+sudo systemctl stop nis1
+```
+
+### 委任秘密鍵を設定
+
+```bash
+vi /opt/nis1/nis/config-user.properties
+```
+
+ファイルの末尾に次の内容を追加します。
+
+```ini title="/opt/nis1/nis/config-user.properties"
+nis.bootKey = <委任秘密鍵>
+```
+
+### NIS1 クライアントの開始
+
+```bash
+sudo systemctl start nis1
+```
+
+## Servant
+
+### Servant をダウンロード
+
+NIS1 クライアントのビルド済みバージョンは、下記のリンクから最新版を確認できます。
+
+[https://bob.nem.ninja/](https://bob.nem.ninja/)
+
+2024/11/11 時点の最新は`v0.0.4`。
+
+```bash
+curl -OL https://bob.nem.ninja/servant_0_0_4.zip
+```
+
+ダウンロードしたファイルを展開します。
+
+```bash
+unzip servant_0_0_4.zip
+rm servant_0_0_4.zip
+```
+
+servant ディレクトリを nis1 と同じ場所（/opt など）に配置します。
+
+```bash
+sudo mv servant /opt
+cd /opt/servant
+```
+
+### Servant の設定
+
+```bash
+vi config.properties
+```
+
+`nem.host`にホスト名または IP アドレスを設定します。
+`servant.key`に委任秘密鍵を設定します。
+
+```ini title="config.properties"
+nem.host = <put vps ip address here>
+...
+servant.key = <委任秘密鍵>
+```
+
+## ポート開放
+
+```bash
+sudo ufw allow 7880
+```
+
+## サービス化（デーモン化）
+
+### サービスファイルの作成
+
+```bash
+sudo vi /etc/systemd/system/nis1-servant.service
+```
+
+```ini title="/etc/systemd/system/nis1-servant.service"
+[Unit]
+Description=NIS1 Servant
+After=network.target
+
+[Service]
+ExecStart=java -Xms256M -Xmx256M -XX:+UseG1GC -cp ".:jars/*" org.nem.rewards.servant.NodeRewardsServant
+Restart=on-failure
+RestartSec=2
+User=<実行ユーザー名>
+Group=<実行ユーザー名>
+StandardOutput=journal
+StandardError=journal
+WorkingDirectory=/opt/servant
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### サービスのリロード
+
+```bash
+sudo systemctl daemon-reload
+```
+
+### サービスの開始
+
+```bash
+sudo systemctl start nis1-servant
+```
+
+### サービスの停止
+
+```bash
+sudo systemctl stop nis1-servant
+```
+
+### サービスの有効化
+
+```bash
+sudo systemctl enable nis1-servant
+```
+
+## スーパーノードプログラムへの登録
+
+NEM ウォレットの「NEM スーパーノードプログラム」画面を開きます。
+（サービス → NEM スーパーノードプログラム）
+
+「プログラムへの参加」タブを押します。
+
+- 参加アドレス: 毎月発表される enrollment address
+- ノード主: 自分のノードのホスト名または IP アドレス
+
+パスワードを入力し、「プログラムへの参加」ボタンを押します。
+
+登録先はプログラム運営元の告知で確認してください。SNS の検索結果だけで送信先を決定しないでください。
+
+## 確認
+
+次のコマンドで Servant が動作しているか確認します。
+
+```bash
+curl -s http://localhost:7880/nr/metaData | jq
+```
+
+次のサイトで自分のノードを検索し、ステータスがすべてグリーンなら正常です。
+
+[NEM スーパーノードプログラム](https://nem.io/supernode/)

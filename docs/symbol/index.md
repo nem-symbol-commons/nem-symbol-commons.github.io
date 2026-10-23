@@ -20,3 +20,13 @@ Symbol 固有の仕様と開発を扱うカテゴリです。
 
 [Symbol開発クイックスタート](quickstart.md)で、Testnet の情報取得とローカル署名を試せます。
 対象は `symbol-sdk@3.3.3` です。送信は明示的に指定した場合だけ行う構成です。
+
+## Symbol SDK入門
+
+旧 nemnesia の連載を移行しました。TypeScript・Python・Dart の例を含み、各章の検証状況は記事中に記載しています。
+
+1. [はじめに](sdk/introduction.mdx)
+2. [環境構築](sdk/environment.mdx)
+3. [アカウント](sdk/accounts.mdx)
+4. [学習用アカウントの準備](sdk/learning-accounts.mdx)
+5. [トランザクション](sdk/transactions.mdx)

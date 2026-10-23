@@ -1,0 +1,121 @@
+---
+title: Symbol SDK入門：環境構築
+description: Symbol SDK を使った開発環境の準備。
+slug: /symbol/sdk/environment
+sidebar_position: 2
+tags:
+- SymbolSDK
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+この連載は既存原稿の学習資料です。最短で試す場合は [Symbol開発クイックスタート](../quickstart.md) を参照してください。
+
+この章では、旧原稿で使っていた Volta と npm による、独立した学習プロジェクトの準備を説明します。
+Commons 本体の開発には [README](https://github.com/nem-symbol-commons/nem-symbol-commons.github.io/blob/main/README.md) の mise・pnpm を使ってください。
+移行時に TypeScript / JavaScript 向け SDK を 3.3.3 に固定しました。Python / Dart の依存バージョンの整理は未完了です。
+
+## 2.1 Visual Studio Code (VS Code) のインストール
+
+まずは、公式サイトから自分のパソコンに合ったものをダウンロードしてインストールしましょう。
+
+- [VS Code 公式サイト](https://code.visualstudio.com/)
+
+## 2.2 Volta のインストール
+
+Volta は Node.js や npm のバージョン管理を簡単にしてくれるツールです。
+
+Volta の公式手順にしたがって、次のコマンドをターミナルで実行します。
+
+```bash
+curl https://get.volta.sh | bash
+```
+
+詳細: [Volta 公式サイト](https://volta.sh/)
+
+## 2.3 Node.js と npm のインストール
+
+Volta を使って Node.js（npm も一緒に入ります）をインストールします。
+
+```bash
+volta install node@24.18.1
+```
+
+インストールできたら、バージョンを確認してみましょう。
+
+```bash
+node -v
+npm -v
+```
+
+## 2.4 プロジェクトディレクトリの作成
+
+次に、作業用のフォルダ（ディレクトリ）を作って、その中に移動します。
+
+```bash
+mkdir my-symbol-project
+cd my-symbol-project
+```
+
+`my-symbol-project` の部分は好きな名前に変えて大丈夫です。
+
+## 2.5 symbol-sdk のインストール
+
+作ったフォルダの中で、次のコマンドを実行して symbol-sdk をインストールします。
+
+```bash
+npm init -y
+npm pkg set type=module
+npm install --save-exact symbol-sdk@3.3.3
+npm install --save-dev --save-exact typescript@6.0.2
+```
+
+TypeScript の例を実行する場合は `src/` に保存し、以下を `tsconfig.json` に設定します。
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"]
+}
+```
+
+`npx tsc` でビルドし、対応する `dist/` 内の JavaScript ファイルを `node` で実行します。
+他の章のコードを参照する例では、必要なクラスを同じプロジェクト内に配置してください。
+
+## 2.6 コード品質ツール（ESLint・Prettier）の導入（推奨）
+
+独立したサンプルプロジェクトで必要な場合に導入します。Commons の Markdown / MDX は自動整形を無効にしているため、この節をサイトの文書設定には適用しません。
+
+### 2.6.1 ESLint・Prettier のインストール
+
+```bash
+npm install --save-dev eslint prettier
+```
+
+### 2.6.2 初期設定
+
+ESLint の初期設定は、次のコマンドでできます。
+
+```bash
+npx eslint --init
+```
+
+設定形式は ESLint の世代で異なります。現在の設定形式は [ESLint の公式ガイド](https://eslint.org/docs/latest/use/configure/configuration-files)を参照してください。
+
+Prettier の設定ファイル（.prettierrc）は必要なら自分で作ってみてください。
+
+これでコード品質ツールの準備も完了です。

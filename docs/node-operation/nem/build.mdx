@@ -1,0 +1,56 @@
+---
+title: NEM（NIS1）ノードのビルド
+description: Ubuntu 24 での NIS1 v0.6.102 のビルドメモ。
+slug: /node-operation/nem/build
+sidebar_position: 2
+tags:
+- NEM
+- NIS1
+- Node
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+このページでは、NEM(NIS1)ノードを Ubuntu 24 でビルドする手順を説明します。
+ビルド済みノードが公開されていない場合や、自分でビルドしたい場合に役立ちます。
+
+## Java と Maven のインストール
+
+```bash
+sudo apt install openjdk-11-jdk maven
+```
+
+## ソースコードのクローン
+
+2025 年 4 月 3 日時点の最新版は `v0.6.102` です。
+
+```bash
+git clone https://github.com/NemProject/nem.git -b v0.6.102 nis1
+```
+
+## ビルド手順
+
+```bash
+cd nis1/infra
+./package.build.sh build.log
+./package.prepare.sh
+```
+
+## ネットワークの設定
+
+ネットワークの指定がないため、メインネットかテストネットを設定します。
+`mainnet` または `testnet` を入力してください。
+
+```bash
+sed -i 's/nem\.network = \r/nem.network = mainnet/g' package/nis/config.properties
+```
+
+## 任意の場所に配置
+
+`nis1/infra/package` ディレクトリを任意の場所に移動します。

@@ -1,0 +1,563 @@
+---
+title: NEM WebSocket
+description: NIS1 の SockJS / STOMP 接続とイベント購読。
+slug: /nem/websocket
+sidebar_position: 3
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+## 1. はじめに
+
+ブロックチェーンの世界では、ネットワーク上で常にさまざまな出来事が起こっています。
+新しいブロックの生成、トランザクションの承認、アカウント残高の変化 ──
+これらはすべて、ノード間でリアルタイムに伝達される重要な情報です。
+
+NEM（New Economy Movement）も同様に、ブロックチェーンの状態を外部から参照するための API を提供しています。
+一般的に利用されるのは REST API ですが、REST では基本的に「クライアントが必要なときにリクエストを送り、サーバーが応答を返す」という仕組みになっています。
+
+そのため、たとえば「アカウントの残高が変わった瞬間を知りたい」というようなリアルタイム性の高い用途では、定期的に API を呼び出す“ポーリング”が必要になります。
+しかし、ポーリングはサーバーへの負荷が高く、最新情報を得るまでにタイムラグが発生するという欠点があります。
+
+こうした課題を解決するために、NEM では WebSocket を用いた通知機能が用意されています。
+WebSocket を使うと、ノード上でイベントが発生したタイミングで、サーバー側からクライアントへ自動的にデータが送信されます。
+これにより、アプリケーションは「新しいトランザクションが届いた」「新しいブロックが生成された」といった出来事を、ほぼリアルタイムで受け取ることができます。
+
+さらに NEM では、単なる WebSocket 通信の上に STOMP（Simple Text Oriented Messaging Protocol） を採用しており、
+“どの情報を購読するか” や “どんなリクエストを送るか” をテキスト形式で簡潔にやり取りできるようになっています。
+
+本書では、この 「NEM の WebSocket（STOMP over WebSocket）」 の仕組みを、
+基本的な構造から実際の接続方法まで、順を追って解説していきます。
+記事を読み終える頃には、NEM ノードからリアルタイムにブロックやトランザクションの情報を受け取れるようになるでしょう。
+
+## 2. WebSocket の基本と STOMP プロトコル
+
+### 2.1. WebSocket とは何か
+
+WebSocket は、クライアントとサーバーが双方向通信を行うためのプロトコルです。
+通常の HTTP 通信では、クライアントがリクエストを送り、それに対してサーバーがレスポンスを返すという、一方向のやり取りになります。
+しかし WebSocket では、一度接続を確立すると、サーバーからクライアントに対しても自由にメッセージを送ることができます。
+
+この仕組みにより、サーバー側でイベントが発生したタイミングで、クライアントにプッシュ通知のようにデータを送信できます。
+たとえばチャットアプリやゲーム、株価のリアルタイム配信などでよく利用される技術です。
+
+NEM ではこの WebSocket を利用することで、ブロック生成やトランザクションの発生といったネットワーク上の出来事を、
+外部アプリケーションがリアルタイムに受け取れるようになっています。
+
+### 2.2. STOMP（Simple Text Oriented Messaging Protocol）
+
+NEM の WebSocket 通信は、単なるソケットメッセージのやり取りではなく、
+STOMP（Simple Text Oriented Messaging Protocol） というプロトコルの上で動作しています。
+
+STOMP は、テキストベースでメッセージを送受信するための軽量なプロトコルです。
+メッセージの送信（SEND）や購読（SUBSCRIBE）など、用途ごとに明確なコマンドを持ち、
+クライアントとサーバーが同じルールに従って通信を行います。
+
+STOMP はメールの「送信」と「受信」のような概念を持っており、
+クライアントは「どの宛先（チャンネル）を購読するか」を指定できます。
+NEM ではこの仕組みを利用し、アカウントやトランザクション、ブロックなどの情報を購読できるようになっています。
+
+たとえば、アカウントの残高変化を監視したい場合、
+クライアントは `/account/アドレス` に対して SUBSCRIBE コマンドを送信します。
+すると、そのアドレスに関連する新しいトランザクションや状態変化が発生するたびに、
+サーバーからメッセージが自動的に配信されます。
+
+また、サーバー側へ情報を要求したい場合は、SEND コマンドを使用します。
+たとえば `/w/api/account/get` に対して
+`{ "account": "アドレス" }` を送ることで、REST API と同様の形式でアカウント情報を取得できます。
+
+### 2.3. STOMP メッセージの基本構造
+
+STOMP メッセージはシンプルなテキスト形式で構成されています。
+典型的なフレーム（メッセージ）は次のような形です。
+
+```
+COMMAND
+header1:value1
+header2:value2
+
+body内容
+^@
+```
+
+COMMAND：メッセージの種類を表します（例：`CONNECT`, `SUBSCRIBE`, `SEND`, `MESSAGE` など）。
+
+ヘッダー：送信先や識別子を指定します（例：`destination:/account/アドレス` など）。
+
+本文（body）：任意のデータで、NEM の場合は主に JSON 形式が使われます。
+
+^@（ヌル文字）：メッセージの終端を示す制御文字です。
+
+このように STOMP は単純でありながら柔軟な構造を持っており、
+多くのプログラミング言語でライブラリが提供されています。
+WebSocket 上で STOMP を利用することで、開発者は通信の細部を意識することなく、
+「どの情報を購読するか」「どんなリクエストを送るか」に集中できます。
+
+### 2.4. まとめ
+
+この章では、NEM の WebSocket 通信が STOMP over WebSocket という形式で動作していることを学びました。
+STOMP はメッセージングプロトコルであり、購読（SUBSCRIBE）と送信（SEND）を使って、
+リアルタイムにデータをやり取りできる仕組みを提供します。
+
+次の章では、実際に NEM ノードが提供する購読パスや取得できる情報の種類を、
+具体的な例とともに確認していきます。
+
+## 3. NEM WebSocket の仕組み
+
+### 3.1. NEM ノードの WebSocket エンドポイント
+
+NEM のノード（NIS）は、外部クライアントがリアルタイムにイベントを受け取れるように
+WebSocket 用のエンドポイントを提供しています。
+
+通常、NEM ノードは次のようなポートで WebSocket 通信を受け付けています。
+
+```
+http://localhost:7778/messages
+```
+
+このアドレスに接続することで、NEM ノードからブロックやトランザクションなどの通知を受け取ることができます。
+（ポート番号はノードの設定によって異なる場合があります）
+
+この URL は SockJS のベース URL です。ここでは SockJS クライアントの上に STOMP を重ねて接続します。通常の WebSocket クライアントへ、この HTTP URL をそのまま渡しても動作しません。
+接続が確立すると、NEM ノードとの間に常時通信チャネルが作られ、
+以降は購読（SUBSCRIBE）や送信（SEND）の命令を通じて、さまざまな情報を受け取れるようになります。
+
+### 3.2. SUBSCRIBE と SEND の関係
+
+NEM の WebSocket 通信では、SUBSCRIBE（購読） と SEND（リクエスト送信） を組み合わせて使います。
+
+SUBSCRIBE：ノード上で発生するイベントを「購読」する。
+→ クライアントは指定した宛先（例：`/account/アドレス`）に新しい情報が届くたびに通知を受け取る。
+
+SEND：ノードに対して明示的にリクエストを送る。
+→ REST API と同様に、特定のアカウントやトランザクション情報を取得するために使用。
+
+この 2 つを併用することで、
+「まず現在の状態を SEND で取得し、その後の更新を SUBSCRIBE で監視する」
+というように、状態と変化の両方をリアルタイムで扱うことができます。
+
+### 3.3. 通信の流れ（イベント通知の仕組み）
+
+NEM の WebSocket 通信は、次のような流れで進みます。
+
+接続（CONNECT）
+クライアントが `http://ノードアドレス:7778/messages` に接続し、STOMP セッションを確立します。
+
+購読の開始（SUBSCRIBE）
+受け取りたい情報を指定して購読します。
+たとえばアカウント情報の場合：
+
+```
+destination:/account/NAXXXXX...
+```
+
+リクエスト送信（SEND）（任意）
+必要に応じて、サーバーにデータ取得リクエストを送ります。
+例：
+
+```
+destination:/w/api/account/get
+body: { "account": "NAXXXXX..." }
+```
+
+メッセージ受信（MESSAGE）
+ノード側でイベント（新しいトランザクション、ブロック生成など）が発生すると、
+STOMP の `MESSAGE` フレームとして通知が届きます。
+受信データは JSON 形式で、REST API とほぼ同じ構造を持ちます。
+
+切断（DISCONNECT）
+クライアントが通信を終了する場合、STOMP の `DISCONNECT` コマンドを送信します。
+
+このように、STOMP over WebSocket では常にコネクションを維持しながら、
+リアルタイムに情報を受け取り続けることができます。
+
+### 3.4. イベント種別と通知単位
+
+NEM の WebSocket では、イベントの種類ごとに購読パスが分かれています。
+たとえば次のように、アカウント関連・トランザクション関連・ブロック関連などに分類されます。
+
+| カテゴリ                 | 購読パス（例）                        | 通知されるイベント                 |
+| ------------------------ | ------------------------------------- | ---------------------------------- |
+| アカウント               | `/account/アドレス`                   | 残高変化、モザイク保有量の更新など |
+| トランザクション         | `/transactions/アドレス`              | 新しい承認済みトランザクション     |
+| 未承認トランザクション   | `/unconfirmed/アドレス`               | 承認前の送信トランザクション       |
+| ブロック                 | `/blocks/new`                         | 新しいブロックの生成通知           |
+| ネームスペース・モザイク | `/account/mosaic/owned/アドレス` など | モザイクやネームスペースの更新     |
+
+購読するパスによって、どのイベントを受け取るかが決まります。
+これらの購読パスと対応するデータモデルは、次の章で詳しく解説します。
+
+### 3.5. REST API との関係
+
+NEM の WebSocket で取得できるデータは、REST API とほぼ同じ構造をしています。
+たとえば `/account/アドレス` で受け取る `AccountMetaDataPair` は、
+REST API の `/account/get` で取得するデータと同一の形式です。
+
+そのため、既に REST API で NEM のデータ構造に慣れている開発者は、
+WebSocket 通知もスムーズに理解できます。
+WebSocket はあくまで「同じ情報をリアルタイムで受け取るための手段」として設計されています。
+
+### 3.6. まとめ
+
+この章では、NEM の WebSocket がどのように動作しているかを確認しました。
+ポイントを整理すると次の通りです。
+
+NEM ノードは `http://ノードアドレス:7778/messages` で WebSocket 接続を受け付けている。
+
+通信は STOMP プロトコル に基づいて行われ、`SUBSCRIBE` と `SEND` を組み合わせて利用する。
+
+イベントが発生すると、ノードから `MESSAGE` フレームがリアルタイムに送られる。
+
+データ構造は REST API と共通である。
+
+次の章では、実際に購読できるパスと、取得できるデータモデルを具体的に一覧で整理していきます。
+
+## 4. 取得できる情報一覧
+
+この章では、NEM の WebSocket から取得できる主な情報と、
+それぞれの購読パス（SUBSCRIBE パス）、対応するリクエスト（SEND パス）、
+および取得できるデータモデルを整理します。
+
+NEM の WebSocket では、REST API と同じデータ構造をそのままリアルタイム通知に利用しています。
+そのため、WebSocket を使えば、アカウントやトランザクション、ブロックなどの最新状態を
+自動的に受け取ることができます。
+
+### 4.1. アカウント関連
+
+■ アカウント情報
+
+購読パス：`/account/アドレス`
+
+送信パス：`/w/api/account/get`
+
+リクエストボディ：`{ "account": "アドレス" }`
+
+データモデル：`AccountMetaDataPair`
+
+この購読では、指定したアドレスのアカウント状態（残高、公開鍵、インポータンスなど）が
+更新されるたびに通知されます。
+REST API の `/account/get` に対応します。
+
+■ 保有モザイク定義
+
+購読パス：`/account/mosaic/owned/definition/アドレス`
+
+送信パス：`/w/api/account/mosaic/owned/definition`
+
+リクエストボディ：`{ "account": "アドレス" }`
+
+データモデル：`MosaicDefinition`（またはその派生）
+
+アカウントが所有しているモザイクの定義情報（名前空間、可分性、供給量など）が通知されます。
+
+■ 保有モザイク量
+
+購読パス：`/account/mosaic/owned/アドレス`
+
+送信パス：`/w/api/account/mosaic/owned`
+
+リクエストボディ：`{ "account": "アドレス" }`
+
+データモデル：`Mosaic`
+
+この購読では、モザイクの保有量（例：XEM の残高やその他のモザイク数量）を取得します。
+
+■ 保有ネームスペース
+
+購読パス：`/account/namespace/owned/アドレス`
+
+送信パス：`/w/api/account/namespace/owned`
+
+リクエストボディ：`{ "account": "アドレス" }`
+
+データモデル：`Namespace`
+
+アカウントが所有しているネームスペース情報を取得します。
+
+4-2. トランザクション関連
+■ 承認済みトランザクション
+
+購読パス：`/transactions/アドレス`
+
+データモデル：`TransactionMetaDataPair`
+
+アドレスに関連するトランザクション（送信・受信のいずれか）が承認されると通知されます。
+ネットワーク上でブロックに含まれた時点でイベントが発生します。
+
+■ 未承認トランザクション
+
+購読パス：`/unconfirmed/アドレス`
+
+データモデル：`TransactionMetaDataPair`
+
+ブロックに含まれる前の、未承認（Unconfirmed）のトランザクションが通知されます。
+ウォレットなどでは、送信直後にこのイベントを受け取ることで「送信待ち」状態を表示します。
+
+■ 直近トランザクション一覧
+
+購読パス：`/recenttransactions/アドレス`
+
+送信パス：`/w/api/account/transfers/all`
+
+リクエストボディ：`{ "account": "アドレス" }`
+
+データモデル：`TransactionMetaDataPair[]`
+
+指定したアドレスの過去トランザクション履歴を配列で取得します。
+購読ではなく、明示的なリクエストとして利用するケースが多いです。
+
+4-3. ブロック関連
+■ ブロックの高さ
+
+購読パス：`/blocks/new`
+
+データモデル：`BlockHeight`
+
+新しいブロックが生成されるたびに、現在のブロック高が通知されます。
+ブロックチェーンの進行を監視するのに便利です。
+
+■ 最新ブロックの情報
+
+購読パス：`/blocks`
+
+データモデル：`Block`
+
+生成されたブロックの完全な情報（タイムスタンプ、トランザクション一覧、署名者など）を取得します。
+
+### 4.4. データモデルの概要
+
+WebSocket で受け取るデータモデルは、すべて JSON 形式です。
+NEM では共通のデータ構造が使われており、REST API の応答と互換性があります。
+
+モデル名 説明 主なフィールド例
+`AccountMetaDataPair` アカウント情報 balance, importance, publicKey
+`TransactionMetaDataPair` トランザクション情報 type, sender, recipient, amount
+`Mosaic` 保有モザイク情報 mosaicId, quantity
+`MosaicDefinition` モザイクの定義情報 id, properties, levy
+`Namespace` ネームスペース情報 fqn, owner, height
+`BlockHeight` 最新ブロック高 height
+`Block` ブロック情報 signer, timeStamp, transactions
+
+### 4-5. まとめ
+
+この章では、NEM WebSocket で購読・取得できる情報を一覧で整理しました。
+
+カテゴリ 主な購読パス データモデル
+アカウント情報 `/account/アドレス` AccountMetaDataPair
+承認済みトランザクション `/transactions/アドレス` TransactionMetaDataPair
+未承認トランザクション `/unconfirmed/アドレス` TransactionMetaDataPair
+ブロック高 `/blocks/new` BlockHeight
+最新ブロック情報 `/blocks` Block
+モザイク／ネームスペース関連 `/account/mosaic/...` `/account/namespace/...` Mosaic, Namespace
+
+次章では、これらのパスを実際に使用し、
+Node.js から接続してデータを受け取るサンプルコードを紹介します。
+
+## 5. 実践編：Node.js で NEM WebSocket に接続してみよう
+
+これまでの章で、NEM の WebSocket の仕組みや購読できる情報の種類を学びました。
+ここでは実際に Node.js を使って、NEM ノードの WebSocket へ接続し、
+リアルタイムでデータを受け取る方法を紹介します。
+
+### 5.1. 開発環境の準備
+
+まずは、Node.js 環境を整えましょう。
+この例は Node.js 24 系、`@stomp/stompjs@7.2.0`、`sockjs-client@1.6.1` を対象とします。接続先の NIS v0.6.102 は SockJS の `/messages` を公開しています。
+
+```
+$ mkdir nem-ws-sample
+$ cd nem-ws-sample
+$ npm init -y
+$ npm install --save-exact @stomp/stompjs@7.2.0 sockjs-client@1.6.1
+```
+
+ここでは、STOMP over WebSocket を扱うために `@stomp/stompjs` と `sockjs-client` を使用します。
+`@stomp/stompjs` はクライアントライブラリで、NEM ノードと STOMP プロトコルでやりとりするために利用します。
+
+### 5.2. 最小構成の接続サンプル
+
+次のサンプルコードでは、NEM ノードに接続して新しいブロック情報を購読します。
+WebSocket の URL は各ノードによって異なりますが、ローカルノードであれば次のようになります。
+
+```
+// file: connect.mjs
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+
+// NEMノードのWebSocketエンドポイント
+const wsUrl = 'http://localhost:7778/messages';
+
+// STOMPクライアントを初期化
+const client = new Client({
+  connectHeaders: {},
+  debug: (str) => console.log('[DEBUG]', str),
+  reconnectDelay: 5000,
+  webSocketFactory: () => new SockJS(wsUrl),
+});
+
+client.onConnect = () => {
+  console.log('✅ Connected to NEM WebSocket');
+
+  // 最新ブロック情報を購読
+  client.subscribe('/blocks', (message) => {
+    const data = JSON.parse(message.body);
+    console.log('🧱 New Block:', data);
+  });
+
+  // ブロック高の変化も購読
+  client.subscribe('/blocks/new', (message) => {
+    const data = JSON.parse(message.body);
+    console.log('📈 Block Height:', data.height);
+  });
+};
+
+client.onStompError = (frame) => {
+  console.error('❌ STOMP Error:', frame.headers['message']);
+  console.error(frame.body);
+};
+
+client.activate();
+```
+
+▶ 実行
+
+```
+$ node connect.mjs
+```
+
+▶ 出力例
+
+```
+✅ Connected to NEM WebSocket
+📈 Block Height: 1824956
+🧱 New Block: { signer: '...', timeStamp: 1824956, transactions: [...] }
+```
+
+これで、NEM ノードのブロック更新をリアルタイムに受け取ることができます。
+
+### 5.3. アカウント情報を購読してみる
+
+次に、特定のアカウントの情報を購読してみましょう。
+アカウントのアドレスを指定して購読すると、そのアカウントに関する残高変化やモザイク更新が通知されます。
+
+```
+// file: account.mjs
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+
+const wsUrl = 'http://localhost:7778/messages';
+const accountAddress = 'NAXXXXXXXXXXXXXXX'; // 実際のアドレスに置き換え
+
+const client = new Client({
+  reconnectDelay: 5000,
+  webSocketFactory: () => new SockJS(wsUrl),
+});
+
+client.onConnect = () => {
+  console.log('✅ Connected');
+
+  // アカウント情報購読
+  client.subscribe(`/account/${accountAddress}`, (message) => {
+    const data = JSON.parse(message.body);
+    console.log('👤 Account Info:', data);
+  });
+
+  // 初期状態を取得（SEND）
+  client.publish({
+    destination: '/w/api/account/get',
+    body: JSON.stringify({ account: accountAddress }),
+  });
+};
+
+client.activate();
+```
+
+実行すると、アカウントの基本情報 (`AccountMetaDataPair`) が表示され、
+その後残高やモザイクに変化があるたびに通知が届きます。
+
+### 5.4. トランザクション通知を受け取る
+
+未承認トランザクションと承認済みトランザクションの両方を購読することで、
+ウォレットの「送信中」「完了」状態をリアルタイムに表示できます。
+
+```
+client.onConnect = () => {
+  console.log('✅ Connected to NEM node');
+
+  // アドレスのイベント監視をNISへ登録
+  client.publish({
+    destination: '/w/api/account/subscribe',
+    body: JSON.stringify({ account: accountAddress }),
+  });
+
+  // 未承認トランザクション
+  client.subscribe(`/unconfirmed/${accountAddress}`, (msg) => {
+    const tx = JSON.parse(msg.body);
+    console.log('💡 Unconfirmed TX:', tx);
+  });
+
+  // 承認済みトランザクション
+  client.subscribe(`/transactions/${accountAddress}`, (msg) => {
+    const tx = JSON.parse(msg.body);
+    console.log('✅ Confirmed TX:', tx);
+  });
+};
+```
+
+ウォレットアプリやエクスプローラでは、この通知を活用して
+「送信直後にリストへ反映 → ブロック承認で状態更新」といった UI を実現しています。
+
+### 5.5. 購読解除・切断
+
+STOMP クライアントは、購読時にサブスクリプション ID を返します。
+これを使って購読解除（`unsubscribe()`）や明示的な切断（`deactivate()`）を行うことができます。
+
+```
+const sub = client.subscribe('/blocks', (msg) => {
+  console.log('Block:', msg.body);
+});
+
+// 30秒後に購読解除
+setTimeout(() => {
+  sub.unsubscribe();
+  console.log('🛑 Unsubscribed from /blocks');
+  client.deactivate();
+}, 30000);
+```
+
+### 5.6. よくあるトラブルと対処法
+
+症状 原因 対処
+`WebSocket connection failed` ノードが起動していない NIS を起動するか接続先 URL を確認
+`STOMP Error: Frame refused` 不正な購読パス `/account/アドレス` のように正しい形式にする
+`No data received` 購読のみで SEND を送っていない `/w/api/...` の SEND で初期リクエストを送る
+
+### 5.7. まとめ
+
+この章では、Node.js を使って NEM WebSocket に接続し、
+リアルタイムでアカウントやブロック情報を受け取る方法を学びました。
+
+ポイントを整理すると：
+
+`@stomp/stompjs` と `sockjs-client` を使えば、簡単に STOMP over WebSocket 接続ができる
+
+`SUBSCRIBE` はイベント購読、`SEND` は明示的なデータ要求
+
+WebSocket を活用すれば、REST よりも即時性の高いウォレット・モニタリングアプリが作れる
+
+応用編の原稿は未移行です。再接続時の取りこぼしは REST API と照合してください。
+
+## 移行時に照合した実装
+
+- [NIS v0.6.102 の SockJS エンドポイント](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/specific/deploy/NisWebAppWebsocketInitializer.java)
+- [NIS の SEND パスと監視登録](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/websocket/WebsocketInitController.java)
+- [通知先とデータ構造](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/websocket/MessagingService.java)
+- [StompJS の Client API](https://stomp-js.github.io/guide/stompjs/using-stompjs-v5.html)
+
+接続コードの import とクライアント生成を確認しています。NIS との継続接続や実イベントの受信は未検証です。

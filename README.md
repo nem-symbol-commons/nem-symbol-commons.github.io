@@ -82,3 +82,8 @@ GitHub Actions でビルド確認と公開を行います。
 
 GitHub のリポジトリ設定で、**Settings → Pages → Build and deployment → Source** を **GitHub Actions** に設定してください。
 記事の変更を PR で確認し、`main` にマージすると自動公開されます。
+
+## 旧サイトからの移行
+
+旧 nemnesia の記事の移行元・移行先と修正内容は [MIGRATION.md](MIGRATION.md) を参照してください。
+各記事に記載した移行時の検証範囲と、旧原稿の対象時期を確認して利用してください。

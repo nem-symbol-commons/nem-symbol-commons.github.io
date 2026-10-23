@@ -1,0 +1,475 @@
+---
+title: NodeWatchのセットアップ
+description: NodeWatch の構築と定期取得・サービス設定。
+slug: /node-operation/nodewatch/setup
+sidebar_position: 1
+tags:
+- Symbol
+- NEM
+- NodeWatch
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+## 1. インストールディレクトリの作成
+
+最初に、ソースコードを配置するディレクトリを作成し、移動します。
+
+```bash
+mkdir nodewatch-src
+cd nodewatch-src
+```
+
+## 2. Python 3.11 のインストールと仮想環境の作成
+
+pyenv を使用します。
+pyenv のインストール方法は、[pyenv インストール](../tools/pyenv.mdx)を参照してください。
+
+Python 3.11 をインストールし、NodeWatch 用の仮想環境を作成します。
+
+```bash
+pyenv install 3.11
+pyenv virtualenv 3.11 nw311
+pyenv local nw311
+pip install --upgrade pip
+```
+
+## 3. miscellaneous のクローン
+
+NodeWatch の依存ツール「miscellaneous」をクローンし、必要なパッケージをインストールします。
+
+この原稿は 2025 年当時の `feat/nem-api-ssl-check` ブランチを使用する構成です。
+[本家](https://github.com/symbol/miscellaneous)の現在の動作を判定した説明ではありません。利用する fork とブランチを確認してください。
+
+```bash
+git clone https://github.com/ccHarvestasya/miscellaneous.git -b feat/nem-api-ssl-check
+cd miscellaneous
+pip install -r requirements.txt
+cd ..
+```
+
+## 4. NodeWatch のクローン
+
+NodeWatch をクローンし、必要なパッケージをインストールします。
+
+```bash
+git clone https://github.com/ccHarvestasya/product.git -b feat/nem-api-ssl-check
+cd product/explorer/nodewatch
+NODEWATCH_ROOT="$PWD"
+pip install -r requirements.txt
+```
+
+必要なディレクトリも作成します。
+
+```bash
+mkdir -p puller/cert
+mkdir -p resources
+```
+
+## 5. 証明書の作成
+
+`puller/cert`ディレクトリに証明書を作成します。
+詳細は[Symbol ノード証明書](../../security/symbol-node-certificates.mdx)を参照してください。
+
+監視接続用の証明書の使い方は対象バージョンの設定と照合してください。同じサーバーでも、ノードの CA 秘密鍵を監視用ディレクトリへ無条件に複製しないでください。
+
+## 6. メインネット
+
+### 6.1. Symbol と NEM のノード情報取得（メインネット）
+
+ノード情報を取得します。
+`puller/cert`ディレクトリにいる場合は、ひとつ上の階層に移動します。
+
+```bash
+cd "$NODEWATCH_ROOT/puller"
+```
+
+そのままでも動作しますが、安定性向上のため最初に接続するノードリストを変更します。
+
+```yaml title="networks/symbol.yaml"
+friendly_name: symbol
+ticker_name: symbol
+currency_symbol: xym
+
+accounts: []
+
+nodes:
+  - host: wolf.importance.jp
+  - host: xymharvesting.net
+  - host: ahra-symbol.com
+  - host: harvest-01.symbol.farm
+  - host: symbol-main-1.nemtus.com
+  - host: xxx-welcome-to-a-powerful-node.com
+  - host: 00A06705.xym.stir-hosyu.com
+```
+
+```yaml title="networks/nem.yaml"
+friendly_name: nem
+ticker_name: nem
+currency_symbol: xem
+
+accounts: []
+
+nodes:
+  - host: zombie.nem.monster
+  - host: cyan.siglight.xyz
+  - host: thrush.sixis.xyz
+  - host: chika03.kuzi.online
+  - host: node15.symbol-nem.net
+  - host: sqiqi13.seventys.site
+```
+
+デフォルトのタイムアウト時間だと時間がかかるため、`--timeout`オプションを追加します。
+
+```sh title="pull.sh"
+#!/bin/bash
+
+echo "$0: generating files in \"$1\" with timeout \"$2\""
+
+echo "[$(date)] crawling Symbol network"
+
+python3 -m network.nodes \
+	--resources ./networks/symbol.yaml \
+	--thread-count 64 \
+	--certs ./cert \
+	--output "$1/symbol_nodes.json" \
+	--timeout "$2"
+
+echo "[$(date)] downloading Symbol richlist"
+
+python3 -m network.richlist_symbol \
+	--resources ./networks/symbol.yaml \
+	--min-balance 250000 \
+	--nodes "$1/symbol_nodes.json" \
+	--output "$1/symbol_richlist.csv" \
+	--timeout "$2"
+
+echo "[$(date)] downloading Symbol harvesters"
+
+python3 -m network.harvester \
+	--resources ./networks/symbol.yaml \
+	--thread-count 64 \
+	--nodes "$1/symbol_nodes.json" \
+	--days 3.5 \
+	--output "$1/symbol_harvesters.csv" \
+	--timeout "$2"
+
+echo "[$(date)] crawling NEM network"
+
+python3 -m network.nodes \
+	--resources ./networks/nem.yaml \
+	--thread-count 64 \
+	--output "$1/nem_nodes.json" \
+	--timeout "$2"
+
+echo "[$(date)] downloading NEM harvesters"
+
+python3 -m network.harvester \
+	--resources ./networks/nem.yaml \
+	--thread-count 64 \
+	--nodes "$1/nem_nodes.json" \
+	--days 3.5 \
+	--output "$1/nem_harvesters.csv" \
+	--timeout "$2"
+```
+
+`pull.sh`を使ってノード情報を取得します。
+
+```bash
+PYTHONPATH=../../../../miscellaneous ./pull.sh ../resources 3
+```
+
+同様に`nodewatch_daily.sh`を使ってノード設置場所情報などを取得します。
+
+```bash
+PYTHONPATH=../../../../miscellaneous ./nodewatch_daily.sh ../resources
+```
+
+これらは定期的に実行する必要があります。
+Cron に登録しておくことをおすすめします。
+
+### 6.2. 設定ファイルの作成（メインネット）
+
+`puller`ディレクトリにいる場合は、ひとつ上の階層に移動します。
+
+```bash
+cd "$NODEWATCH_ROOT"
+```
+
+`config.py`を作成します。
+
+```python title="config.py"
+RESOURCES_PATH = "./resources"
+SYMBOL_EXPLORER_ENDPOINT = "https://sakia.harvestasya.com:3001"
+SYMBOL_GENERATION_HASH_SEED = "57F7DA205008026C776CB6AED843393F04CD458E0AA2D9F1D5F31A402072B2D6"
+NEM_EXPLORER_ENDPOINT = "http://eolia.nis1.harvestasya.com:7890"
+```
+
+## 7. テストネット
+
+### 7.1. Symbol と NEM のノード情報取得（テストネット）
+
+ノード情報を取得します。
+`puller/cert`ディレクトリにいる場合は、ひとつ上の階層に移動します。
+
+```bash
+cd "$NODEWATCH_ROOT/puller"
+```
+
+テストネットを参照するよう、最初に接続するノードリストを変更します。
+
+```yaml title="networks/symbol.yaml"
+friendly_name: symbol
+ticker_name: symbol
+currency_symbol: xym
+network: testnet
+
+accounts: []
+
+nodes:
+  - host: 001-sai-dual.symboltest.net
+  - host: 2.dusanjp.com
+  - host: sym-test-01.opening-line.jp
+  - host: t.sakia.harvestasya.com
+  - host: vmi831828.contaboserver.net
+```
+
+```yaml title="networks/nem.yaml"
+friendly_name: nem
+ticker_name: nem
+currency_symbol: xem
+network: testnet
+
+accounts: []
+
+nodes:
+  - host: libertalia.nemtest.net
+  - host: ntn1.dusanjp.com
+  - host: ocracoke.nemtest.net
+  - host: tortuga.nemtest.net
+```
+
+オプションに`--network "testnet"`を追加します。
+
+```sh title="pull.sh"
+#!/bin/bash
+
+echo "$0: generating files in \"$1\" with timeout \"$2\""
+
+echo "[$(date)] crawling Symbol network"
+
+python3 -m network.nodes \
+	--resources ./networks/symbol.yaml \
+	--thread-count 64 \
+	--certs ./cert \
+	--output "$1/symbol_nodes.json" \
+	--timeout "$2" \
+	--network "testnet"
+
+echo "[$(date)] downloading Symbol richlist"
+
+python3 -m network.richlist_symbol \
+	--resources ./networks/symbol.yaml \
+	--min-balance 250000 \
+	--nodes "$1/symbol_nodes.json" \
+	--output "$1/symbol_richlist.csv" \
+	--timeout "$2" \
+	--mosaic-id "72C0212E67A08BCE"
+
+echo "[$(date)] downloading Symbol harvesters"
+
+python3 -m network.harvester \
+	--resources ./networks/symbol.yaml \
+	--thread-count 64 \
+	--nodes "$1/symbol_nodes.json" \
+	--days 3.5 \
+	--output "$1/symbol_harvesters.csv" \
+	--timeout "$2" \
+	--mosaic-id "72C0212E67A08BCE"
+
+echo "[$(date)] crawling NEM network"
+
+python3 -m network.nodes \
+	--resources ./networks/nem.yaml \
+	--thread-count 64 \
+	--output "$1/nem_nodes.json" \
+	--timeout "$2" \
+	--network "testnet"
+
+echo "[$(date)] downloading NEM harvesters"
+
+python3 -m network.harvester \
+	--resources ./networks/nem.yaml \
+	--thread-count 64 \
+	--nodes "$1/nem_nodes.json" \
+	--days 3.5 \
+	--output "$1/nem_harvesters.csv" \
+	--timeout "$2"
+```
+
+`pull.sh`を使ってノード情報を取得します。
+
+```bash
+PYTHONPATH=../../../../miscellaneous ./pull.sh ../resources 3
+```
+
+同様に`nodewatch_daily.sh`を使ってノード設置場所情報などを取得します。
+
+```bash
+PYTHONPATH=../../../../miscellaneous ./nodewatch_daily.sh ../resources
+```
+
+これらは定期的に実行する必要があります。
+Cron に登録しておくことをおすすめします。
+
+### 7.2. 設定ファイルの作成（テストネット）
+
+`config.py` は NodeWatch のルートへ配置します。
+
+```bash
+cd "$NODEWATCH_ROOT"
+```
+
+`config.py`を作成します。
+
+```python title="config.py"
+RESOURCES_PATH = "./resources"
+SYMBOL_EXPLORER_ENDPOINT = "https://t.sakia.harvestasya.com:3001"
+SYMBOL_GENERATION_HASH_SEED = "49D6E1CE276A85B70EAFE52349AACCA389302E7A9754BCF1221E79494FC665A4"
+NEM_EXPLORER_ENDPOINT = "http://libertalia.nemtest.net:7890"
+NETWORK_NAME = "testnet"
+SYMBOL_VOTING_SET_GROUPING = 720
+```
+
+## 8. Gunicorn での起動
+
+`gunicorn`をインストールします。
+
+```bash
+pip install gunicorn
+```
+
+NodeWatch を起動します。
+
+```bash
+NODEWATCH_SETTINGS="$NODEWATCH_ROOT/config.py" gunicorn "nodewatch:create_app()"
+```
+
+## 9. サービス化
+
+### 9.1. NodeWatch のサービス化
+
+`/etc/systemd/system/nodewatch.service`を作成します。
+
+```ini title="/etc/systemd/system/nodewatch.service"
+[Unit]
+Description=NodeWatch
+After=network.target
+
+[Service]
+User=<USER>
+Group=<GROUP>
+WorkingDirectory=/home/<USER>/nodewatch-src/product/explorer/nodewatch
+Environment="NODEWATCH_SETTINGS=/home/<USER>/nodewatch-src/product/explorer/nodewatch/config.py"
+ExecStart=/home/<USER>/.pyenv/versions/nw311/bin/gunicorn \
+          --bind 127.0.0.1:8000 \
+          "nodewatch:create_app()"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 9.2. pull.sh のサービス化
+
+`/etc/systemd/system/nodewatch-puller.service`を作成します。
+
+```ini title="/etc/systemd/system/nodewatch-puller.service"
+[Unit]
+Description=Pull NodeWatch Data
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/<USER>/nodewatch-src/product/explorer/nodewatch/puller
+Environment="PATH=/home/<USER>/.pyenv/versions/nw311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="PYTHONPATH=/home/<USER>/nodewatch-src/miscellaneous"
+ExecStart=/home/<USER>/nodewatch-src/product/explorer/nodewatch/puller/pull.sh ../resources 3
+```
+
+前回の実行から 20 分以上経過している場合のみ実行するよう、`/etc/systemd/system/nodewatch-puller.timer`を作成します。
+
+```ini title="/etc/systemd/system/nodewatch-puller.timer"
+[Unit]
+Description=Run pull-nodewatch every 20 minutes after last completion
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=20min
+
+[Install]
+WantedBy=timers.target
+```
+
+### 9.3. nodewatch_daily.sh のサービス化
+
+`/etc/systemd/system/nodewatch-daily.service`を作成します。
+
+```ini title="/etc/systemd/system/nodewatch-daily.service"
+[Unit]
+Description=Pull Daily NodeWatch Data
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/<USER>/nodewatch-src/product/explorer/nodewatch/puller
+Environment="PATH=/home/<USER>/.pyenv/versions/nw311/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="PYTHONPATH=/home/<USER>/nodewatch-src/miscellaneous"
+ExecStart=/home/<USER>/nodewatch-src/product/explorer/nodewatch/puller/nodewatch_daily.sh ../resources
+```
+
+日次取得用の timer も作成します。
+
+```ini title="/etc/systemd/system/nodewatch-daily.timer"
+[Unit]
+Description=Run NodeWatch daily data pull
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+### 9.4. サービスの起動と有効化
+
+サービスを起動し、有効化します。
+
+```bash
+sudo systemctl daemon-reload
+
+sudo systemctl enable nodewatch
+sudo systemctl start nodewatch
+sudo systemctl status nodewatch
+
+sudo systemctl enable nodewatch-puller.timer
+sudo systemctl start nodewatch-puller.timer
+sudo systemctl status nodewatch-puller.timer
+
+sudo systemctl enable nodewatch-daily.timer
+sudo systemctl start nodewatch-daily.timer
+sudo systemctl status nodewatch-daily.timer
+```
+
+次回の`nodewatch-puller.timer`の実行時間は、`systemctl list-timers`で確認できます。
+
+## 移行時の修正と検証範囲
+
+作業ディレクトリ、設定ファイルのパス、timer / service 名を揃え、原稿に不足していた日次 timer を追記しました。
+timer の説明は [systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html) に照合しています。
+ノード収集・Gunicorn・systemd サービスの実起動は未検証です。記載ノードの稼働と fork の現行互換性も利用時に確認してください。

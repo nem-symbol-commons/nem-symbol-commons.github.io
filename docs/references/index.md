@@ -29,3 +29,7 @@ SDK のパッケージ名や API が異なる場合は、コード例をその�
 - [開発者向けリンク集](developer-links.md): 技術資料・実装・SDK・Explorer・Faucet。
 - [ネットワーク情報一覧](networks.md): Mainnet / Testnet の識別子、接続例、主要ポート。
 - [REST APIの基本](rest-api.md): リクエストとレスポンス、送信後の確認。
+
+## NodeWatch
+
+[NodeWatch OpenAPIクライアント作成](nodewatch-openapi.mdx)で、OpenAPI 定義からの生成手順を確認できます。

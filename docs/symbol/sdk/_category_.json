@@ -1,0 +1,9 @@
+{
+  "label": "Symbol SDK入門",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "slug": "/symbol/sdk",
+    "description": "アカウントからトランザクションまで、旧 nemnesia の Symbol SDK 入門原稿を移行した連載です。"
+  }
+}

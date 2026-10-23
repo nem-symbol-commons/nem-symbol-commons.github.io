@@ -1,0 +1,296 @@
+---
+title: Symbol SDK入門：トランザクション
+description: トランザクションのライフサイクル、転送の作成と署名。
+slug: /symbol/sdk/transactions
+sidebar_position: 5
+---
+
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+この連載は既存原稿の学習資料です。最短で試す場合は [Symbol開発クイックスタート](../quickstart.md) を参照してください。
+
+## 5.1 トランザクションとは
+
+### 5.1.1 トランザクションの基本概念
+
+ブロックチェーンにおける「トランザクション」とは、**ネットワークに記録される操作や処理の単位**を指します。  
+銀行における「振込」や「引き落とし」が処理の単位であるのと同様に、ブロックチェーン上では「アカウントからアカウントへの送金」や
+「モザイクの発行」といった操作がトランザクションです。
+
+トランザクションは、署名された後にネットワークへアナウンスされ、ノードに伝播し、最終的にブロックに取り込まれることで台帳に記録されます。  
+これにより、誰でも検証可能な形で「いつ」「誰が」「何をしたか」が保証されます。
+
+### 5.1.2 Symbol ブロックチェーンにおける役割
+
+Symbol ブロックチェーンでは、送信やモザイク発行などの操作をトランザクションで指定します。ブロック生成に伴う報酬や期限切れ処理など、明示的な利用者トランザクション以外による状態変化もあります。
+
+- アカウント間の XYM 送金
+- 新しいモザイク（トークン）の発行
+- ネームスペースの登録
+- マルチシグアカウントの設定
+- アグリゲートトランザクションによる複数操作の一括実行
+
+これらはすべて「トランザクション」という形式で表現され、ブロックチェーンに取り込まれることで有効になります。  
+つまり、トランザクションは **ブロックチェーンを動かす最小単位の命令** だと捉えることができます。
+
+### 5.1.3 トランザクションの種類（概要）
+
+Symbol では多様な用途に対応するために、複数の種類のトランザクションが用意されています。代表的なものを以下に挙げます。
+
+- **転送トランザクション**  
+  アカウント間で XYM やモザイクを送信するトランザクション。メッセージも付与可能。
+
+- **アグリゲートトランザクション**  
+  複数のトランザクションを一つにまとめて実行する仕組み。複数署名者による共同署名も可能。
+
+- **モザイク関連トランザクション**  
+  新規モザイクの作成、供給量の変更、制約（譲渡制限など）の設定を行う。
+
+- **ネームスペース関連トランザクション**  
+  ネームスペースの登録や更新を行う。モザイクやアカウントにフレンドリーな名前を付与できる。
+- **アカウント関連トランザクション**  
+  マルチシグ設定、キーリンク、アカウント設定変更など。
+
+これらのトランザクションが組み合わさることで、Symbol ブロックチェーン上で多様なアプリケーションを構築することができます。
+
+## 5.2 トランザクションのライフサイクル
+
+トランザクションは作成されてからブロックに記録されるまで、いくつかの段階を経ます。  
+この流れを理解しておくことは、アプリケーション開発において「いつ送金が完了したとみなせるか」
+「どのタイミングでエラー処理を行うか」を判断する上で重要です。
+
+### 5.2.1 ライフサイクルの流れ
+
+1. **作成**  
+   アプリケーションやウォレットで、送金や操作の内容を指定してトランザクションを生成します。  
+   例: 送信先アドレス、送信量、手数料、メッセージなどを組み込む。
+2. **署名**  
+   作成したトランザクションを秘密鍵で署名します。これにより、
+
+   - 対応する秘密鍵で承認されたこと
+   - 改ざんされていないこと
+
+   が保証されます。
+
+3. **アナウンス**  
+   署名済みトランザクションをノードに送信します。署名済みデータを HTTP クライアントで REST API へ送ります。SDK 3 系のモデル・署名処理と HTTP 通信は別です。
+4. **ネットワーク伝播**  
+   受け取ったノードは、P2P ネットワークを通じて他のノードへトランザクションを転送します。  
+   この段階ではまだブロックに取り込まれていないため「未承認」状態です。
+5. **ブロック取り込み**  
+   ノードの収集したトランザクションがバリデーションを通過すると、次に生成されるブロックに格納されます。  
+   ブロックに含まれると「承認済み」となり、さらに最終化が進むことで「確定」します。
+
+### 5.2.2 トランザクションのステータス
+
+トランザクションには以下のステータスがあります。
+
+- **Unconfirmed（未承認）**  
+  アナウンスされ、ネットワークに伝播しているが、まだブロックに含まれていない状態。
+
+- **Confirmed（承認済み）**  
+  ブロックに含まれ、チェーンに記録された状態。アプリケーションの要件に応じ、さらにファイナライズを待つかを判断します。
+
+- **Finalized（確定）**  
+  ファイナリティが到達し、チェーン分岐の影響を受けない状態。高額取引や重要な処理ではこの状態を待つことがあります。
+
+### 5.2.3 ノード間での伝播の仕組み
+
+Symbol のネットワークは P2P 方式で構築されています。
+
+1. クライアントがトランザクションをノード A にアナウンスする。
+2. ノード A は署名や手数料、アカウント残高などを検証する。
+3. 問題がなければ、ノード A はトランザクションを保持し、他のピアノードへ転送する。
+4. ピアへ伝播し、条件を満たせばブロックへ取り込まれる。次のブロックへの取り込みが保証されるわけではない。
+
+この仕組みにより、トランザクションは分散的かつ効率的に処理されます。
+
+## 5.3 転送トランザクション
+
+転送トランザクションは最も基本的なトランザクションです。XYM やモザイクを他のアカウントに送金するときに使用します。
+
+Symbol SDK では、以下の項目を指定してトランザクションを作成します：
+
+- 送信者
+- 宛先アドレス
+- 送信するモザイク
+- メッセージ（任意）
+- 手数料
+
+メッセージには文字列や暗号化されたメッセージを添付できます。
+手数料はトランザクションのサイズに応じて自動計算されますが、手動設定も可能です。
+
+以下は転送を作成する例です。5.3 と 5.4.1 の同じ言語のコードをつなげて使います。
+TypeScript は第 4 章の `src/KeyStore.ts` と同じディレクトリに配置し、TypeScript のビルド後に `KeyStore.js` を import する構成です。
+TypeScript のコンパイルでは `module` / `moduleResolution` を `NodeNext`、`target` を `ES2022` 以降にしてください。
+Python / Dart の依存バージョンと実行は未検証です。
+
+<Tabs groupId="language">
+  <TabItem value="ts" label="TypeScript">
+    ```ts
+    import {
+      descriptors,
+      generateMosaicAliasId,
+      models,
+      SymbolFacade,
+      SymbolTransactionFactory,
+    } from 'symbol-sdk/symbol';
+    import { KeyStore } from './KeyStore.js';
+
+    const keyStore = new KeyStore('testnet');
+
+    const facade = new SymbolFacade('testnet');
+
+    // 署名アカウント(送信者)
+    const aliceAccount = facade.createAccount(keyStore.AlicePrivateKey);
+    // 受信アカウント
+    const bobPublicAccount = facade.createPublicAccount(keyStore.BobPublicKey);
+
+    // 転送モザイク設定
+    const mosaicId = generateMosaicAliasId('symbol.xym');
+    const mosaics = [
+      new descriptors.UnresolvedMosaicDescriptor(
+        new models.UnresolvedMosaicId(mosaicId),
+        new models.Amount(10_000000n)
+      ),
+    ];
+
+    // 平文メッセージ
+    const message = new TextEncoder().encode('\0Hello, Symbol!!');
+
+    // 転送トランザクションディスクリプタ生成
+    const transferTxDescriptor = new descriptors.TransferTransactionV1Descriptor(
+      bobPublicAccount.address,
+      mosaics,
+      message
+    );
+
+    // 転送トランザクション生成
+    const transferTx = facade.createTransactionFromTypedDescriptor(
+      transferTxDescriptor,
+      aliceAccount.publicKey,
+      100, // 手数料係数
+      60 * 60 * 2 // 有効期限(秒)
+    );
+
+    console.log(transferTx.toJson());
+    ```
+
+  </TabItem>
+  <TabItem value="py" label="Python">
+    ```py
+    import json
+    import os
+    import sys
+
+    from symbolchain import sc
+    from symbolchain.facade.SymbolFacade import SymbolFacade
+    from symbolchain.symbol.IdGenerator import generate_mosaic_alias_id
+    from symbolchain.symbol.TransactionFactory import TransactionFactory
+
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    from KeyStore import KeyStore
+
+    key_store = KeyStore('testnet')
+
+    facade = SymbolFacade('testnet')
+
+    # 署名アカウント(送信者)
+    alice_account = facade.create_account(key_store.AlicePrivateKey)
+    # 受信アカウント
+    bob_account = facade.create_public_account(key_store.BobPublicKey)
+
+    # 転送モザイク設定
+    namespace_id = generate_mosaic_alias_id('symbol.xym')
+    mosaics = [
+        {'mosaic_id': namespace_id, 'amount': 10_000000},
+    ]
+
+    # 平文メッセージ
+    message = b'\0Hello, Symbol!!'
+
+    # 転送トランザクション生成
+    transfer_tx: sc.TransferTransactionV1 = facade.transaction_factory.create(
+        {
+            'type': 'transfer_transaction_v1',
+            'signer_public_key': alice_account.public_key,
+            'deadline': int(facade.now().add_hours(2).timestamp),  # 2時間後のネットワーク時刻（ミリ秒）
+            'recipient_address': bob_account.address,
+            'mosaics': mosaics,
+            'message': message,
+        }
+    )
+    transfer_tx.fee = sc.Amount(transfer_tx.size * 100)  # 手数料設定(係数100)
+
+    print(json.dumps(transfer_tx.to_json(), indent=2, ensure_ascii=False))
+    ```
+
+  </TabItem>
+</Tabs>
+
+このように、転送トランザクションは必要な情報を指定することで、
+比較的シンプルなコードで作成できます。
+次は、このトランザクションに署名してネットワークへアナウンスしましょう。
+
+## 5.4 署名とアナウンス
+
+作成したトランザクションは、まだネットワークで有効ではありません。有効化するには以下の 2 つのステップが必要です：
+
+### 5.4.1 署名
+
+署名は、送信者本人がトランザクションを承認したことを証明する重要な処理です。秘密鍵を使用して署名することで：
+
+- 対応する秘密鍵による承認を検証
+- トランザクションの改ざんを防止
+- 誰でも送信者と内容を検証可能
+
+<Tabs groupId="language">
+  <TabItem value="ts" label="TypeScript">
+    ```ts
+    // アリス署名
+    const sig = aliceAccount.signTransaction(transferTx);
+    const payloadJsonString = SymbolTransactionFactory.attachSignature(transferTx, sig);
+
+    console.log('txHash:', facade.hashTransaction(transferTx).toString());
+    console.log('payload:', payloadJsonString);
+    console.log(transferTx.toJson());
+    ```
+
+  </TabItem>
+  <TabItem value="py" label="Python">
+    ```py
+    # アリス署名
+    sig = alice_account.sign_transaction(transfer_tx)
+    payload_json_string = TransactionFactory.attach_signature(transfer_tx, sig)
+
+    print("txHash:", facade.hash_transaction(transfer_tx))
+    print("payload:", payload_json_string)
+    print(json.dumps(transfer_tx.to_json(), indent=2, ensure_ascii=False))
+    ```
+
+  </TabItem>
+</Tabs>
+
+## 5.5 送信と取り込み確認
+
+元原稿のアナウンス節と REST 節は未完成だったため、移行時に仮コードを省略しました。
+実行できる手順は [Symbol開発クイックスタート](../quickstart.md)、レスポンスの読み方は [REST APIの基本](../../references/rest-api.md) を参照してください。
+
+ファイナライズは REST のトランザクション `group` の値として返る状態ではありません。
+`confirmed` の取り込み高と、`/chain/info` の `latestFinalizedBlock.height` を比較する観測と、証明の独立検証は別です。
+
+## 参照資料
+
+- [SDK 3.3.3 の SymbolFacade](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/facade/SymbolFacade.js)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)
+
+掲載例は学習用アカウントを事前に用意する断片コードです。移行時にネットワークへの送信は実行していません。

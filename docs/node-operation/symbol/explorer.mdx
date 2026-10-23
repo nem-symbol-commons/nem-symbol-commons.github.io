@@ -1,0 +1,100 @@
+---
+title: Symbol Explorerのインストール
+description: Symbol Explorer v1.4.0 の構築・サービス設定メモ。
+slug: /node-operation/symbol/explorer
+sidebar_position: 2
+tags:
+- Symbol
+- NodeWatch
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+## 1. Symbol Explorer のクローン
+
+Symbol Explorer のソースコードをクローン、必要なパッケージをインストールします。  
+2025/10/13 時点での最新バージョンは `v1.4.0` です。
+
+```bash
+git clone https://github.com/symbol/explorer.git -b v1.4.0
+cd explorer
+npm install
+```
+
+## 2. 環境変数の設定
+
+この旧構成では `src/config/default.json` に `PORT` を追加します。
+
+```text title="src/config/default.json の抜粋"
+{
+	"PORT": 4000,
+	"apiNodePort": 3001,
+	"endpoints": {
+	...略
+```
+
+`.env`ファイルを作成し、以下の内容を記述します。
+`src/config/default.json` の内容を参考に必要に応じて値を変更してください。
+
+```env title=".env"
+PORT=4500
+endpoints='{"marketData":"https://min-api.cryptocompare.com/","nodeWatch":"https://sse.nemnesia.com"}'
+footer='{"link":[{"href":"https://github.com/symbol","text":"Github","icon":"IconGithub"},{"href":"https://discord.gg/NMA9YQ55td","text":"Discord","icon":"IconDiscord"},{"href":"https://x.com/thesymbolchain","text":"Twitter","icon":"IconTwitter"}]}'
+```
+
+## 3. ビルドと起動
+
+Node v20.x 系を使用していることを確認し、ビルドと起動を行います。
+
+Volta を使用している場合は、ピン留めを行います。
+
+```bash
+volta pin node@20
+```
+
+ビルドします。
+
+```bash
+npm run build
+```
+
+## 4. サービスの起動と有効化
+
+システム起動時に自動的にサービスが起動するように設定します。
+
+```ini title="/etc/systemd/system/symbol-explorer-mainnet.service"
+[Unit]
+Description=Symbol Explorer MainNet
+After=network.target
+
+[Service]
+User=<USER>
+Group=<GROUP>
+WorkingDirectory=/home/<USER>/explorer
+EnvironmentFile=/home/<USER>/explorer/.env
+ExecStart=/home/<USER>/.volta/bin/volta run node server.js
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+サービスを起動し、有効化します。
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start symbol-explorer-mainnet.service
+sudo systemctl enable symbol-explorer-mainnet.service
+```
+
+サービスの状態を確認します。
+
+```bash
+sudo systemctl status symbol-explorer-mainnet.service
+```

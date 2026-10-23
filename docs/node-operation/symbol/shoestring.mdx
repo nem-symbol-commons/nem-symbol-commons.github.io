@@ -1,0 +1,66 @@
+---
+title: Shoestring導入メモ（未完）
+description: Shoestring の導入準備。ノード構築全体の手順は未整備です。
+slug: /node-operation/symbol/shoestring
+sidebar_position: 1
+tags:
+- Symbol
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+:::warning この原稿だけではノードは構築できません
+
+元原稿は導入途中のメモです。鍵生成後の設定、ノード生成、起動、同期確認は未整備です。
+構築全体は [Shoestring の構築ガイド](https://docs.symboltest.net/en/userbook/shoestring/quickstart/)を参照してください。
+
+:::
+
+## 1. インストールディレクトリの作成
+
+任意の場所にノードの設定ファイルやデータを配置するディレクトリを作成し、移動します。
+
+```bash
+mkdir symbol
+cd symbol
+```
+
+## 2. Python 3.11 のインストールと仮想環境の作成
+
+pyenv を使用します。
+pyenv のインストール方法は、[pyenv インストール](../tools/pyenv.mdx)を参照してください。
+
+Python 3.11 をインストールし、Shoestring 用の仮想環境を作成します。
+
+```bash
+pyenv install 3.11
+pyenv virtualenv 3.11 shoestring311
+pyenv local shoestring311
+pip install --upgrade pip
+```
+
+## 3. shoestring のインストール
+
+shoestring をインストールします。
+
+```bash
+pip install symbol-shoestring
+```
+
+
+## 4. メインアカウントの秘密鍵を作成
+
+新しい作業ディレクトリで、OpenSSL を使って Ed25519 の専用鍵を生成する例です。既存ノードの鍵を上書きしないでください。
+
+```bash
+umask 077
+openssl genpkey -algorithm ed25519 -out ca.key.pem
+```
+
+`ca.key.pem` は秘密鍵です。保存・バックアップ・オフライン管理の手順を確認するまで、資金の移動や実運用には進まないでください。

@@ -20,3 +20,8 @@ NEM（NIS1）固有の仕様と開発を扱うカテゴリです。
 
 [NEM開発クイックスタート](quickstart.md)で、NIS1 Testnet の情報取得と XEM 転送のローカル署名を試せます。
 対象は `symbol-sdk@3.3.3` の NEM API です。Symbol の送信 API とは異なります。
+
+## イベント通知
+
+[NEM WebSocket](websocket.mdx)で、NIS1 の SockJS / STOMP 接続と購読パスを確認できます。
+ノードの構築記事は [ノード運用](../node-operation/nem/setup.mdx) に配置しています。

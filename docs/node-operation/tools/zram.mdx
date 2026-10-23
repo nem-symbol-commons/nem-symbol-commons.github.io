@@ -1,0 +1,73 @@
+---
+title: ZRAMの設定
+description: Ubuntu 系環境での zram-tools による圧縮メモリ設定。
+slug: /node-operation/tools/zram
+sidebar_position: 3
+tags:
+- etc
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+ZRAM は、圧縮されたブロックデバイスを作成し、システムのメモリ使用効率を向上させるための Linux カーネルモジュールです。
+
+## 1. ZRAM のインストール
+
+モジュールが存在するか確認
+
+```bash
+lsmod | grep zram
+```
+
+もし存在しない場合、以下のコマンドでインストールします。
+
+```bash
+sudo apt install linux-modules-extra-$(uname -r)
+```
+
+モジュールをロードします。
+
+```bash
+sudo modprobe zram
+```
+
+ZRAM は多くの Linux ディストリビューションで標準的にサポートされています。以下のコマンドでインストールします。
+
+```bash
+sudo apt install zram-tools
+```
+
+## 2. ZRAM の設定
+
+ZRAM の設定ファイルを編集します。`/etc/default/zramswap`を開き、以下のように設定します。
+
+```bash
+sudo vi /etc/default/zramswap
+```
+
+```config title="/etc/default/zramswap"
+ALGO=lz4
+PERCENT=50
+```
+
+ここで、`ALGO`は使用する圧縮アルゴリズムを指定し、`PERCENT`はシステムメモリの何パーセントを ZRAM に割り当てるかを指定します。
+
+## 3. ZRAM の有効化
+
+設定を反映させるために、ZRAM サービスを再起動します。
+
+```bash
+sudo systemctl restart zramswap
+```
+
+ZRAM が正しく有効化されているか確認します。
+
+```bash
+cat /proc/swaps
+```

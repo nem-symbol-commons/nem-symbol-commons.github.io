@@ -1,0 +1,188 @@
+---
+title: Symbol SDK入門：学習用アカウントの準備
+description: Testnet で使用する学習用アカウントの準備。
+slug: /symbol/sdk/learning-accounts
+sidebar_position: 4
+tags:
+- SymbolSDK
+- Account
+---
+
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+この連載は既存原稿の学習資料です。最短で試す場合は [Symbol開発クイックスタート](../quickstart.md) を参照してください。
+
+本書では、実際のネットワーク上の資産は扱わず、テストネット上で動作を確認できる専用アカウントを用意します。
+テストネットでは faucet（フォーセット）を利用して、少量の XYM を無料で受け取ることができます。
+これにより、安全に開発や学習を進めることができます。
+
+この章のコードは `.testnet-mnemonic` の準備が前提です。原稿に含まれていた固定・伏せ字のフレーズは、移行時にファイル読み込みへ変更しました。
+以後の章でも同じファイルとパスフレーズを使います。ファイルを失うと同じ鍵を復元できないため、Testnet 専用のバックアップを保管してください。
+
+## 4.1 ニーモニックからの生成
+
+### 4.1.1 4 つのアカウントを生成
+
+Symbol SDK では、ニーモニックから複数のアカウントを派生させることができます。
+学習用として、送信者・受信者・マルチシグ関連・特殊用途など、4 つのアカウントをあらかじめ生成しておくと便利です。
+
+第 3 章の `Bip32.random()` を使い、自分専用のニーモニックを生成・保存します。
+第 2 章の学習用プロジェクトのルートで実行してください。既存ファイルがあれば上書きしません。
+
+```bash
+node --input-type=module <<'JS'
+import { writeFileSync } from 'node:fs';
+import { Bip32 } from 'symbol-sdk';
+writeFileSync('.testnet-mnemonic', new Bip32().random(), {
+  flag: 'wx',
+  mode: 0o600,
+});
+JS
+printf '\n.testnet-mnemonic\n' >> .gitignore
+```
+
+これは暗号化されていない秘密情報です。Testnet 専用として管理し、ソース管理や共有ストレージに含めないでください。
+以下の例は、このファイルから読み込んでアカウントを派生させます。
+
+### 4.1.2 コンスタントクラスに設定
+
+生成したアカウントは、プログラム内で使いやすいように定数クラスにまとめます。
+これにより、学習中に毎回アカウントを生成する必要がなくなり、ソースコードの見やすさと再利用性が向上します。
+
+<Tabs groupId="language">
+  <TabItem value="ts" label="TypeScript">
+    ```ts title="src/KeyStore.ts"
+    import { readFileSync } from 'node:fs';
+    import { Bip32 } from 'symbol-sdk';
+    import { KeyPair, SymbolFacade } from 'symbol-sdk/symbol';
+
+    export class KeyStore {
+      private readonly mnemonic = readFileSync('.testnet-mnemonic', 'utf8').trim();
+      private readonly password = '';
+
+      private keypairs: KeyPair[] = [];
+
+      constructor(networkType: 'testnet' = 'testnet') {
+        const maxAccounts = 4;
+        const facade = new SymbolFacade(networkType);
+        const bip32Node = new Bip32().fromMnemonic(this.mnemonic, this.password);
+        for (let i = 0; i < maxAccounts; i++) {
+          const bip32Path = facade.bip32Path(i);
+          const childBip32Node = bip32Node.derivePath(bip32Path);
+          const keypair = SymbolFacade.bip32NodeToKeyPair(childBip32Node);
+          this.keypairs.push(keypair);
+        }
+      }
+
+      public get AlicePrivateKey() {
+        return this.keypairs[0].privateKey;
+      }
+      public get AlicePublicKey() {
+        return this.keypairs[0].publicKey;
+      }
+
+      public get BobPrivateKey() {
+        return this.keypairs[1].privateKey;
+      }
+      public get BobPublicKey() {
+        return this.keypairs[1].publicKey;
+      }
+
+      public get CarolPrivateKey() {
+        return this.keypairs[2].privateKey;
+      }
+      public get CarolPublicKey() {
+        return this.keypairs[2].publicKey;
+      }
+
+      public get DavePrivateKey() {
+        return this.keypairs[3].privateKey;
+      }
+      public get DavePublicKey() {
+        return this.keypairs[3].publicKey;
+      }
+    }
+    ```
+
+  </TabItem>
+  <TabItem value="py" label="Python">
+    ```py title="src/KeyStore.py"
+    from pathlib import Path
+    from symbolchain.Bip32 import Bip32
+    from symbolchain.facade.SymbolFacade import KeyPair, SymbolFacade
+
+
+    class KeyStore:
+        mnemonic = Path('.testnet-mnemonic').read_text().strip()
+        password = ''
+
+        def __init__(self, network_type='testnet'):
+            max_accounts = 4
+            self.keypairs: list[KeyPair] = []
+            self.facade = SymbolFacade(network_type)
+            bip32_node = Bip32().from_mnemonic(self.mnemonic, self.password)
+            for i in range(max_accounts):
+                bip32_path = self.facade.bip32_path(i)
+                child_bip32_node = bip32_node.derive_path(bip32_path)
+                keypair = SymbolFacade.bip32_node_to_key_pair(child_bip32_node)
+                self.keypairs.append(keypair)
+
+        @property
+        def AlicePrivateKey(self):
+            return self.keypairs[0].private_key
+
+        @property
+        def AlicePublicKey(self):
+            return self.keypairs[0].public_key
+
+        @property
+        def BobPrivateKey(self):
+            return self.keypairs[1].private_key
+
+        @property
+        def BobPublicKey(self):
+            return self.keypairs[1].public_key
+
+        @property
+        def CarolPrivateKey(self):
+            return self.keypairs[2].private_key
+
+        @property
+        def CarolPublicKey(self):
+            return self.keypairs[2].public_key
+
+        @property
+        def DavePrivateKey(self):
+            return self.keypairs[3].private_key
+
+        @property
+        def DavePublicKey(self):
+            return self.keypairs[3].public_key
+    ```
+
+  </TabItem>
+</Tabs>
+
+## 4.2 テストネットでの利用
+
+### 4.2.1 フォーセットから少量 XYM を取得
+
+テストネットの XYM は、以下のフォーセットから入手できます。
+
+- フォーセット: https://testnet.symbol.tools/
+
+Faucet の認証や払い出し条件は変更されるため、利用時に画面の案内を確認してください。秘密鍵やニーモニックを入力しないでください。
+
+### 4.2.2 デスクトップウォレットに設定
+
+取得した XYM を確認するために、公式の Symbol デスクトップウォレットに学習用アカウントをインポートします。
+ウォレットに設定しておくことで、トランザクションの確認や署名状態の確認などが簡単に行えます。

@@ -14,3 +14,7 @@ description: 鍵管理とアプリケーション・ノードの安全性を扱�
 公開鍵やアドレスを含むログでも、公開してよい情報か確認してから共有します。
 
 ノードの具体的な設定は [ノード運用](../node-operation/index.md)、暗号技術の基礎は [共通技術・比較](../common/index.md) で扱います。
+
+## ノード証明書
+
+[Symbolノード証明書の作成と更新](symbol-node-certificates.mdx)に、OpenSSL による作成例と移行時の検証範囲を記載しています。

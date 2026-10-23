@@ -1,0 +1,266 @@
+---
+title: NEM（NIS1）ノードのセットアップ
+description: Ubuntu 24 と NIS1 v0.6.102 の構築メモ。
+slug: /node-operation/nem/setup
+sidebar_position: 1
+tags:
+- NEM
+- NIS1
+- Node
+---
+
+:::note 移行記事
+
+2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
+移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
+対象バージョンや検証状況を本文で確認してください。
+
+:::
+
+このページでは、ビルド済みの NEM(NIS1)ノードを Ubuntu 24 にインストールする方法を説明します。
+
+NIS v0.6.102 を対象とする移行記事です。現在の要件は [ノード構築ガイド](https://docs.nemtest.net/en/userbook/node/install/) と [リリース](https://github.com/NemProject/nem/releases/tag/v0.6.102) を確認してください。
+`nem.folder` の保存先とサービス実行ユーザーの書き込み権限を合わせ、`nis.bootKey` を含む設定ファイルは公開しないでください。
+
+## Java のインストール
+
+```sh
+sudo apt install openjdk-11-jre-headless
+```
+
+## NEM(NIS1)クライアントのダウンロード
+
+NIS1 クライアントの最新版は、下記のリンクから確認できます。
+
+[https://github.com/NemProject/nem/releases](https://github.com/NemProject/nem/releases)
+
+2025 年 10 月 1 日時点の最新バージョンは `v0.6.102` です。
+
+```sh
+curl -OL https://github.com/NemProject/nem/releases/download/v0.6.102/nis-0.6.102.tgz
+```
+
+展開します。
+
+```bash
+tar -xzvf nis-0.6.102.tgz
+rm nis-0.6.102.tgz
+```
+
+展開された `package` ディレクトリは、任意の場所に配置してください。
+
+## NIS1 の設定
+
+### 配置場所
+
+ここでは`/opt`に配置する例を紹介します。
+
+```bash
+sudo mv package /opt/nis1
+cd /opt/nis1
+```
+
+### コンフィグファイルの作成と編集(メインネット)
+
+`config-user.properties`ファイルを新規作成し、必要な項目を設定します。
+
+```bash
+vi nis/config-user.properties
+```
+
+- `nem.folder`: ブロックデータの保存先（デフォルトは `~/nem`）
+- `nem.host`: ドメインがない場合は IP アドレスを指定します
+- `nis.bootName`: ノードの名前
+- `nis.unlockedLimit`: ハーベストを受け入れる人数の上限（デフォルトは 4、10 程度が一般的です）
+- `nis.ipDetectionMode`: ドメイン設定時に IP アドレスになるのを防止
+- `nis.bootKey`: 起動用の専用秘密鍵。委任ハーベストを使う場合は委任先の鍵を指定し、資産を持つ主アカウントの秘密鍵は設定しない
+
+```ini title="nis/config-user.properties"
+# ブロックデータ保存ディレクトリ
+nem.folder = /opt/nis1
+
+# ホスト名
+nem.host = xxxx.xxxxxxxx.com
+
+# ブート名(ノードの名前です)
+nis.bootName = MyNode
+
+# ハーベストを受け入れる人数の上限値
+nis.unlockedLimit = 10
+
+# HOSTがIPにならないようにする
+nis.ipDetectionMode = Disabled
+
+# 委任秘密鍵
+nis.bootKey = <委任秘密鍵>
+```
+
+### コンフィグファイルの作成と編集(テストネット)
+
+テストネットの場合は、追加で設定が必要です。
+
+```ini title="nis/config-user.properties"
+nem.network = testnet
+nis.treasuryReissuanceForkHeight = 1
+nis.treasuryReissuanceForkTransactionHashes =
+nis.treasuryReissuanceForkFallbackTransactionHashes =
+nis.multisigMOfNForkHeight = 1
+nis.mosaicsForkHeight = 1
+nis.firstFeeForkHeight = 1
+nis.secondFeeForkHeight = 1
+nis.remoteAccountForkHeight = 1
+nis.mosaicRedefinitionForkHeight = 1
+
+# ブロックデータ保存ディレクトリ
+nem.folder = /opt/nis1
+
+# ホスト名
+nem.host = xxxx.xxxxxxxx.com
+
+# ブート名(ノードの名前です)
+nis.bootName = MyNode
+
+# ハーベストを受け入れる人数の上限値
+nis.unlockedLimit = 10
+
+# HOSTがIPにならないようにする
+nis.ipDetectionMode = Disabled
+
+# 委任秘密鍵
+nis.bootKey = <委任秘密鍵>
+```
+
+## NIS1 ノードの起動確認
+
+一度ノードを起動し、動作を確認します。
+
+### 起動
+
+```bash
+sh nix.runNis.sh
+```
+
+### ポート開放
+
+7890 はノード通信、7778 は WebSocket を外部提供する場合の例です。WebSocket を提供しない構成では 7778 の開放は不要です。
+
+```bash
+sudo ufw allow 7890/tcp
+sudo ufw allow 7778/tcp
+```
+
+### 確認
+
+ノードの状態を確認します。
+
+```bash
+curl -s http://127.0.0.1:7890/heartbeat | jq
+```
+
+ノードの基本情報を確認します。
+
+```bash
+curl -s http://127.0.0.1:7890/node/info | jq
+```
+
+ブロック高を確認します。
+
+```bash
+curl -s http://127.0.0.1:7890/chain/height | jq
+```
+
+### 停止
+
+```bash
+curl -s http://127.0.0.1:7890/shutdown
+```
+
+## サービス化(デーモン化)
+
+```bash
+sudo vi /etc/systemd/system/nis1.service
+```
+
+```ini title="/etc/systemd/system/nis1.service"
+[Unit]
+Description=NIS1 Client
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/java -Xms4G -Xmx8G -XX:+UseG1GC -cp ".:./*:../libs/*" org.nem.deploy.CommonStarter
+ExecStop=/usr/bin/curl -s http://127.0.0.1:7890/shutdown
+Restart=on-failure
+RestartSec=2
+User=<実行ユーザー名>
+Group=<実行ユーザー名>
+StandardOutput=journal
+StandardError=journal
+WorkingDirectory=/opt/nis1/nis
+SuccessExitStatus=143
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`-Xms4G` と `-Xmx8G` はマシンスペックに合わせて変更してください。マシンメモリ容量の 1/3 ～ 1/2 くらいが良いかなと思います。
+
+### サービスをリロード
+
+ユニットファイルを編集した後、systemd に変更をリロードする必要があります。
+
+```bash
+sudo systemctl daemon-reload
+```
+
+### サービスを有効化
+
+サービスを有効化して、システム起動時に自動的に起動するように設定します。
+
+```bash
+sudo systemctl enable nis1
+```
+
+### サービスを開始
+
+サービスを開始します。
+
+```bash
+sudo systemctl start nis1
+```
+
+### サービスを停止
+
+サービスを停止します。
+
+```bash
+sudo systemctl stop nis1
+```
+
+### ログの確認
+
+nis1 サービスのログを確認します。最新から見るには `-r` オプションを使います。
+
+```bash
+sudo journalctl -u nis1 -r
+```
+
+リアルタイムで確認したい場合は `-f` オプションを使います。
+
+```bash
+sudo journalctl -u nis1 -f
+```
+
+色付きで表示したい場合は、`-o cat` オプションを追加します。
+
+```bash
+sudo journalctl -u nis1 -f -o cat
+```
+
+## ノードリスト
+
+メインネット：
+https://nodewatch.symbol.tools/nem/nodes
+
+テストネット：
+https://nodewatch.symbol.tools/testnet/nem/nodes
