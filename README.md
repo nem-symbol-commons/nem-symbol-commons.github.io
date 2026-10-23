@@ -61,6 +61,9 @@ Markdown / MDX は、表の列揃えによる過剰な空白を避けるため�
 pnpm build
 ```
 
+開発サーバーは `.docusaurus/`、`pnpm build` は `.docusaurus/build/` に生成ファイルを置きます。
+開発中のビルドで、本番専用の Google Analytics の処理が開発サーバーに混ざるのを防ぎます。
+
 出力先は `build/` です。生成結果は次のコマンドでローカル確認できます。
 
 ```bash
