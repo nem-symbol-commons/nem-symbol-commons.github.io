@@ -3,6 +3,7 @@ import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import Layout from "@theme/Layout";
 import Heading from "@theme/Heading";
+import IconExternalLink from "@theme/Icon/ExternalLink";
 import HomepageFeatures from "@site/src/components/HomepageFeatures";
 import styles from "./index.module.css";
 
@@ -38,7 +39,7 @@ export default function Home(): ReactNode {
               執筆方針と変更の送り方は貢献ガイドをご覧ください。
             </p>
             <Link to="https://github.com/nem-symbol-commons/nem-symbol-commons.github.io/blob/main/CONTRIBUTING.md">
-              貢献ガイドを読む →
+              貢献ガイドを読む <IconExternalLink />
             </Link>
           </div>
         </section>
