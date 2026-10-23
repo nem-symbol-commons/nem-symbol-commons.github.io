@@ -57,7 +57,7 @@ export default function HomepageFeatures(): ReactNode {
       <div className="container">
         <Heading as="h2" id="topics-title">技術分野から探す</Heading>
         <p className={styles.intro}>
-          各ページで扱うテーマと参照資料を案内しています。記事は順次整備していきます。
+          基本用語やクイックスタートから学び、分野ごとの記事と参照資料へ進めます。
         </p>
         <div className={styles.grid}>
           {topics.map(({ title, to, description }) => (

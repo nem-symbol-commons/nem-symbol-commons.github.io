@@ -15,3 +15,8 @@ NEM（NIS1）固有の仕様と開発を扱うカテゴリです。
 - [共通技術・比較](../common/index.md): NEM と Symbol の違いを整理する。
 
 資料やコード例を利用する前に、NEM（NIS1）を対象としていることと、対応バージョンを確認してください。
+
+## 最初に試す
+
+[NEM開発クイックスタート](quickstart.md)で、NIS1 Testnet の情報取得と XEM 転送のローカル署名を試せます。
+対象は `symbol-sdk@3.3.3` の NEM API です。Symbol の送信 API とは異なります。

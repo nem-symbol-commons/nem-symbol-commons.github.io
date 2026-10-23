@@ -14,3 +14,7 @@ NEM / Symbol の両方に関係する考え方や比較を扱うカテゴリで�
 対象チェーンと実装を確認し、比較記事では共通する点と異なる点を分けて記述します。
 
 個別の仕様は [Symbol](../symbol/index.md) と [NEM（NIS1）](../nem/index.md)、鍵の安全な取り扱いは [セキュリティ](../security/index.md) を参照してください。
+
+## 比較から学ぶ
+
+[NEMとSymbolの違い](nem-and-symbol.md)で、API・アドレス・モザイク・署名データの違いを確認できます。
