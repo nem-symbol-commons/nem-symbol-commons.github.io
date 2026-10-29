@@ -26,5 +26,4 @@ NEM（NIS1）と Symbol の手順は、対象チェーンやネットワーク�
 - NEM（NIS1）: [セットアップ](nem/setup.mdx)、[ビルド](nem/build.mdx)、[スーパーノード登録の旧手順](nem/supernode.mdx)。
 - Symbol: [Shoestring の導入メモ（未完）](symbol/shoestring.mdx)、[Explorer のインストール](symbol/explorer.mdx)。
 - NodeWatch: [セットアップ](nodewatch/setup.mdx)、[OpenAPI クライアント生成](../references/nodewatch-openapi.mdx)。
-- 共通の運用ツール: [pyenv](tools/pyenv.mdx)、[uv](tools/uv.mdx)、[ZRAM](tools/zram.mdx)。
 - [Symbol ノード証明書](../security/symbol-node-certificates.mdx)。

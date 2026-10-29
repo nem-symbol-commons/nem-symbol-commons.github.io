@@ -48,6 +48,11 @@ const topics = [
     "title": "リファレンス",
     "to": "/docs/references",
     "description": "API・SDK の仕様と実装、外部資料へのリンクをまとめます。"
+  },
+  {
+    "title": "開発環境・ツール",
+    "to": "/docs/development-tools",
+    "description": "実行環境やパッケージ管理ツールの導入と使い方を扱います。"
   }
 ];
 

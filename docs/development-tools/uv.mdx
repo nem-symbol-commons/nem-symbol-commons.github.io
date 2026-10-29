@@ -1,0 +1,258 @@
+---
+title: uvのインストールとPython環境の管理
+description: uv の導入・更新・削除、Python バージョンの指定、仮想環境の作成と自動適用。
+slug: /development-tools/uv
+sidebar_position: 2
+tags:
+  - Python
+---
+
+[uv](https://docs.astral.sh/uv/) は、Python のインストール、仮想環境の作成、依存パッケージの管理を行うツールです。
+ソースコードは [astral-sh/uv](https://github.com/astral-sh/uv) で公開されています。
+
+以下のコマンドは Linux / macOS の Bash を対象に、Python 3.12 を例として記載しています。Python のバージョンは、利用する SDK やアプリケーションの要件に合わせてください。
+
+## uv のインストール
+
+[公式インストーラー](https://docs.astral.sh/uv/getting-started/installation/)を実行します。uv の導入前に Python をインストールする必要はありません。
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+インストール後、バージョンを確認します。
+
+```bash
+uv --version
+```
+
+`uv` が見つからない場合は、インストーラーが案内するコマンドで PATH 設定を反映してください。
+
+### コマンドの入力補完
+
+Bash で uv と uvx の入力補完を有効にするには、次の設定を `~/.bashrc` に一度だけ追記し、読み込み直します。
+
+```bash
+echo 'eval "$(uv generate-shell-completion bash)"' >> ~/.bashrc
+echo 'eval "$(uvx --generate-shell-completion bash)"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+以後は Tab キーでサブコマンドやオプションを補完できます。ほかのシェルの設定は、公式の[シェル補完の手順](https://docs.astral.sh/uv/getting-started/installation/#shell-autocompletion)を参照してください。
+
+## 普段使う Python のバージョンを設定する
+
+### uv が使う既定のバージョン
+
+Python をインストールし、ユーザー全体の既定値を設定します。
+
+```bash
+uv python install 3.12
+uv python pin --global 3.12
+```
+
+`--global` は、uv のユーザー設定ディレクトリに `.python-version` を保存します。プロジェクト側にバージョン指定がない場合に使われます。詳細は公式の [Python バージョン指定](https://docs.astral.sh/uv/concepts/python-versions/#python-version-files)を参照してください。
+
+### 通常の python コマンドでも使う場合
+
+`uv python pin --global` だけでは、シェルで実行する `python` / `python3` は切り替わりません。uv 管理の Python をこれらのコマンドでも使うには、`--default` を指定します。
+
+```bash
+uv python install 3.12 --default
+uv python update-shell
+```
+
+ターミナルを開き直し、参照先とバージョンを確認します。
+
+```bash
+command -v python
+python --version
+command -v python3
+python3 --version
+```
+
+`--default` は公式ドキュメントでは実験的な機能です。`python` / `python3` を uv の実行ファイル配置先へ追加するため、`PATH` 上でそのディレクトリが先に見つかる必要があります。仮想環境やほかのバージョン管理ツールが有効な場合は、そちらが優先されることがあります。
+
+参照: [Python のインストールと実行ファイル](https://docs.astral.sh/uv/guides/install-python/)。
+
+## プロジェクトごとの Python バージョンと仮想環境
+
+バージョン指定と仮想環境は、役割が異なります。
+
+| 設定・ディレクトリ                    | 役割                                                       |
+| ------------------------------------- | ---------------------------------------------------------- |
+| `.python-version`                     | uv が使用する Python のバージョンを指定する。              |
+| `.venv/`                              | そのプロジェクト専用の Python 実行環境とパッケージを置く。 |
+| `pyproject.toml` の `requires-python` | プロジェクトが対応する Python のバージョン範囲を宣言する。 |
+
+### 新しいプロジェクトを作る
+
+Python 3.12 を使うプロジェクトを作成し、仮想環境を準備します。
+
+```bash
+uv init --python 3.12 my-python-project
+cd my-python-project
+uv sync
+```
+
+`uv init --python 3.12` で `.python-version` と `pyproject.toml` が作成され、`uv sync` で `.venv/` と `uv.lock` が作成されます。指定した Python が見つからない場合は、既定で自動ダウンロードされます。
+
+既存プロジェクトのバージョン指定を変更する場合は、プロジェクトのディレクトリで次を実行します。
+
+```bash
+uv python pin 3.12
+uv sync
+```
+
+指定するバージョンは `requires-python` の範囲内である必要があります。`uv python pin` は既存の仮想環境をその場で変更せず、次の `uv sync` や `uv run` で必要に応じて仮想環境が作り直されます。
+
+`3.12` はパッチバージョンを固定しません。パッチまでそろえる必要がある場合は、`uv python pin 3.12.12` のように具体的なバージョン番号を指定してください。`.python-version`、`pyproject.toml`、`uv.lock` は Git で共有し、`.venv/` は共有しません。
+
+参照: [uv のプロジェクト管理](https://docs.astral.sh/uv/guides/projects/)。
+
+### パッケージを追加する
+
+uv プロジェクトでは、`uv add` で依存関係を記録し、仮想環境にもインストールします。
+
+```bash
+uv add requests
+```
+
+`pyproject.toml` と `uv.lock` が更新されます。別の端末や共有先では `uv sync` で依存関係をそろえます。
+
+## 仮想環境に入る・抜ける
+
+プロジェクトのディレクトリで仮想環境を有効化すると、通常の `python` コマンドで `.venv/` の Python を使えます。
+
+```bash
+source .venv/bin/activate
+python --version
+python -c "import sys; print(sys.executable)"
+```
+
+`sys.executable` がプロジェクトの `.venv/bin/python` を指していることを確認します。
+
+仮想環境から抜けるには、次を実行します。
+
+```bash
+deactivate
+```
+
+有効化は現在のシェルにだけ適用されます。別のターミナルでは再度有効化します。
+
+参照: [仮想環境の有効化と解除](https://docs.astral.sh/uv/pip/environments/)。
+
+## 仮想環境を自動で適用する
+
+uv プロジェクトでは、`uv run` を付けて実行すると、プロジェクトの仮想環境が自動で選ばれます。実行前に `.venv/` の作成や依存関係の同期も行われるため、毎回 `source` を実行する必要はありません。
+
+```bash
+uv run python --version
+uv run python -c "import sys; print(sys.executable)"
+```
+
+Python スクリプトを実行する場合も同様です。
+
+```bash
+uv run python main.py
+```
+
+`main.py` は実行するファイル名に置き換えてください。`uv run` の適用範囲は実行したコマンドで、現在のシェル全体は切り替わりません。ディレクトリへ `cd` するだけで仮想環境が有効になるわけではありません。
+
+参照: [プロジェクト内でのコマンド実行](https://docs.astral.sh/uv/concepts/projects/run/)。
+
+### pyproject.toml を使わず、仮想環境だけ作る場合
+
+既存のスクリプトなどで、仮想環境とパッケージのインストールだけを行うなら、`uv venv` と `uv pip` を使います。
+
+```bash
+mkdir python-scripts
+cd python-scripts
+uv python pin 3.12
+uv venv
+uv pip install requests
+uv pip list
+```
+
+`uv pip` は、有効化済みの仮想環境がなければ、現在または親ディレクトリの `.venv/` を自動検出します。Python の実行には `source .venv/bin/activate` で有効化するか、`.venv/bin/python` を直接指定します。
+
+```bash
+.venv/bin/python -c "import requests; print(requests.__version__)"
+```
+
+`uv pip install` は `pyproject.toml` や `uv.lock` に依存関係を記録しません。
+
+## uv のバージョンアップ
+
+公式インストーラーで導入した uv は、次のコマンドで更新します。
+
+```bash
+uv self update
+uv --version
+```
+
+Homebrew や pip などで導入した場合は、導入に使ったパッケージマネージャーで更新します。その場合、`uv self update` は無効です。
+
+参照: [uv の更新方法](https://docs.astral.sh/uv/getting-started/installation/#upgrading-uv)。
+
+## uv のアンインストール
+
+### 保存データも削除する場合
+
+キャッシュや uv 管理の Python、`uv tool` で導入したツールも不要な場合は、**uv 本体を削除する前に**、保存先を確認します。
+
+```bash
+uv cache dir
+uv python dir
+uv python dir --bin
+uv tool dir
+```
+
+`uv python dir` は Python 本体の保存先、`uv python dir --bin` は実行ファイルの配置先です。Python 本体のディレクトリを削除しても、配置先の `python3.12` や、`--default` で追加した `python` / `python3` のシンボリックリンクは残ります。削除前に、次のコマンドでリンク先（`->` の右側）を確認します。
+
+```bash
+ls -l "$(uv python dir --bin)"/python*
+```
+
+`uv python dir` 配下を指すリンクだけを削除してください。たとえば、標準の `~/.local/bin` にある次の 3 つがいずれも uv 管理の Python を指している場合は、次を実行します。配置先を変更している場合や、ほかのバージョンも導入した場合は、確認したパスに読み替えてください。
+
+```bash
+rm -i ~/.local/bin/python3.12 ~/.local/bin/python ~/.local/bin/python3
+```
+
+存在しないリンクは指定から外し、OS やほかのツールが管理する Python の実行ファイルやリンクは削除しないでください。
+
+参照: [Python 実行ファイルのインストール](https://docs.astral.sh/uv/concepts/python-versions/#installing-python-executables)、[実行ファイルの配置先の確認](https://docs.astral.sh/uv/reference/cli/#uv-python-dir)。
+
+これらのデータを削除するには、次を実行します。uv 管理の Python に依存する仮想環境や、導入済みのツールは使えなくなるため、今後も必要な環境がないことを確認してください。
+
+```bash
+uv cache clean
+rm -r "$(uv python dir)"
+rm -r "$(uv tool dir)"
+```
+
+各プロジェクトの `.venv/` やソースコード、ユーザー設定ディレクトリの `.python-version` はこの操作では削除されません。不要な設定は個別に削除します。
+
+### ~/.bashrc の補完設定を削除する
+
+`~/.bashrc` をエディターで開き、入力補完の設定時に追加した次の 2 行を削除します。
+
+```bash
+eval "$(uv generate-shell-completion bash)"
+eval "$(uvx --generate-shell-completion bash)"
+```
+
+uv 専用の環境設定ファイルを読み込む行も追加されていれば削除します。ほかのツールも使う PATH 設定は残してください。編集後はターミナルを開き直します。
+
+### 本体を削除する
+
+公式インストーラーを使い、標準の `~/.local/bin` に導入した場合は、本体を削除します。配置先を変更している場合は、実際のパスに読み替えてください。
+
+```bash
+rm ~/.local/bin/uv ~/.local/bin/uvx
+```
+
+Homebrew や pip などで導入した場合は、導入に使ったパッケージマネージャーでアンインストールします。
+
+参照: [uv のアンインストール方法](https://docs.astral.sh/uv/getting-started/installation/#uninstallation)。

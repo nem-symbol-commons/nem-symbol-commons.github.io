@@ -30,6 +30,7 @@ NEM と Symbol について知るには、[両チェーンの違い](../common/n
 - [セキュリティ](../security/index.md)：鍵管理と安全な運用。
 - [トラブルシューティング](../troubleshooting/index.md)：症状別の原因調査。
 - [リファレンス](../references/index.md)：API・SDK・外部資料。
+- [開発環境・ツール](../development-tools/index.md)：実行環境やパッケージ管理ツールの導入と使い方。
 
 記事は順次追加しています。入口ページのみの分野もあります。
 

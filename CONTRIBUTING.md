@@ -22,6 +22,7 @@ mise・pnpm のセットアップ、開発サーバーの起動方法、VS Code 
 - `security/`: 鍵管理とセキュリティ。
 - `troubleshooting/`: 問題別の対処方法。
 - `references/`: API、SDK、外部資料へのリンク。
+- `development-tools/`: チェーンに依存しない実行環境・パッケージ管理ツールの導入と使い方。
 
 各カテゴリの `index.md` は入口ページです。記事を追加したら、必要に応じて入口からリンクしてください。
 サイドバーは自動生成され、カテゴリの順序は `_category_.json`、記事の順序は front matter の `sidebar_position` で指定できます。

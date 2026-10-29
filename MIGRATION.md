@@ -21,9 +21,9 @@
 | `docs-nem/nem-node-setup/NEMスーパーノードプログラム.mdx` | [docs/node-operation/nem/supernode.mdx](docs/node-operation/nem/supernode.mdx) |
 | `docs-sym/memo/nodewatch-setup.mdx` | [docs/node-operation/nodewatch/setup.mdx](docs/node-operation/nodewatch/setup.mdx) |
 | `docs-sym/memo/nodewatch-openapi.mdx` | [docs/references/nodewatch-openapi.mdx](docs/references/nodewatch-openapi.mdx) |
-| `docs-sym/memo/pyenv-install.mdx` | [docs/node-operation/tools/pyenv.mdx](docs/node-operation/tools/pyenv.mdx) |
-| `docs-sym/memo/python-uv.mdx` | [docs/node-operation/tools/uv.mdx](docs/node-operation/tools/uv.mdx) |
-| `docs-sym/memo/zram.mdx` | [docs/node-operation/tools/zram.mdx](docs/node-operation/tools/zram.mdx) |
+| `docs-sym/memo/pyenv-install.mdx` | 移行後に削除（pyenv の導入手順） |
+| `docs-sym/memo/python-uv.mdx` | [docs/development-tools/uv.mdx](docs/development-tools/uv.mdx) |
+| `docs-sym/memo/zram.mdx` | 移行後に削除（ZRAM の設定手順） |
 | `docs-sym/memo/shoestring-setup.mdx` | [docs/node-operation/symbol/shoestring.mdx](docs/node-operation/symbol/shoestring.mdx) |
 | `docs-sym/memo/symbol-explorer-setup.mdx` | [docs/node-operation/symbol/explorer.mdx](docs/node-operation/symbol/explorer.mdx) |
 | `docs-sym/memo/symbol-certs.mdx` | [docs/security/symbol-node-certificates.mdx](docs/security/symbol-node-certificates.mdx) |
