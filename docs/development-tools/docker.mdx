@@ -1,0 +1,179 @@
+---
+title: Dockerのインストール
+description: Ubuntu 24.04 LTS / 26.04 LTS に公式 APT リポジトリから Docker Engine と Docker Compose を導入する手順。
+slug: /development-tools/docker
+sidebar_position: 3
+tags:
+  - Docker
+  - Ubuntu
+---
+
+Ubuntu 24.04 LTS / 26.04 LTS に、Docker 公式の APT リポジトリから Docker Engine と Docker Compose プラグインをインストールします。
+以下は、systemd が動作する 64-bit 版 Ubuntu のサーバーまたは仮想マシンで、Bash と `sudo` を使う手順です。
+
+| Ubuntu | コードネーム | APT リポジトリの Suite |
+| --- | --- | --- |
+| 24.04 LTS | Noble Numbat | `noble` |
+| 26.04 LTS | Resolute Raccoon | `resolute` |
+
+両バージョンで同じコマンドを使います。Suite と CPU アーキテクチャは OS から取得します。
+Docker の対応状況と導入手順は、[公式の Ubuntu 向けインストールガイド](https://docs.docker.com/engine/install/ubuntu/)に基づきます（2026年10月30日確認）。Docker Desktop はこの手順には含みません。
+
+## OS を確認する
+
+```bash
+cat /etc/os-release
+dpkg --print-architecture
+```
+
+`VERSION_ID` が `24.04` または `26.04` であることを確認します。一般的な x86-64 サーバーでは `amd64`、64-bit ARM サーバーでは `arm64` と表示されます。
+
+## 競合するパッケージを確認する
+
+Ubuntu 側の Docker パッケージや、別途導入した `containerd` / `runc` は、Docker 公式パッケージと競合する場合があります。まず導入済みのパッケージを確認します。
+
+```bash
+dpkg --get-selections \
+  docker.io docker-compose docker-compose-v2 docker-doc docker-buildx \
+  podman-docker containerd runc
+```
+
+未導入のパッケージについては、該当するパッケージがない旨のメッセージが出ることがあります。
+導入済みなら、稼働中のコンテナーやほかのサービスへの影響、必要なデータのバックアップを確認したうえで、該当するパッケージ名だけを指定して削除します。たとえば `docker.io` が導入済みの場合は次を実行します。
+
+```bash
+sudo apt remove docker.io
+```
+
+`containerd` や `runc` をほかのサービスが使用している場合は、先に移行方法を確認してください。
+Docker 公式パッケージは、これらの依存関係を `containerd.io` として導入します。
+
+## Docker 公式の APT リポジトリを登録する
+
+署名鍵の取得に使うパッケージを導入し、鍵を保存します。
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
+
+リポジトリ設定を `/etc/apt/sources.list.d/docker.sources` に書き込みます。
+次のブロックは `EOF` の行までまとめて実行してください。
+
+```bash
+sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+```
+
+24.04 では `Suites: noble`、26.04 では `Suites: resolute` が登録されます。
+以前に Docker 公式リポジトリを登録した環境では、既存の `docker.list` などと設定が重複しないよう整理してください。
+
+## Docker Engine と Compose をインストールする
+
+```bash
+sudo apt install \
+  docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+```
+
+Docker Engine、CLI、コンテナーランタイムに加え、イメージのビルドに使う Buildx と、複数コンテナーの管理に使う Compose が導入されます。
+Compose は `docker compose` と、スペースで区切って実行します。
+
+サービスの状態と自動起動の設定を確認します。
+
+```bash
+sudo systemctl is-active docker
+sudo systemctl is-enabled docker
+```
+
+通常は `active` と `enabled` が表示されます。停止中、または自動起動が無効なら、次を実行します。
+
+```bash
+sudo systemctl enable --now docker.service containerd.service
+```
+
+起動に失敗する場合は、ログを確認します。
+
+```bash
+sudo journalctl -u docker.service -n 100 --no-pager
+```
+
+## 動作を確認する
+
+```bash
+sudo docker version
+sudo docker compose version
+sudo docker buildx version
+sudo docker run --rm hello-world
+```
+
+`docker version` で Client と Server の両方の情報が表示され、最後のコマンドで `Hello from Docker!` と表示されれば、イメージの取得とコンテナーの実行を確認できます。
+`--rm` は実行終了後にテスト用コンテナーを削除します。取得したイメージは残ります。
+
+接続エラーが出る場合は Docker サービスの状態を、イメージの取得に失敗する場合はネットワークやプロキシの設定を確認してください。
+
+## sudo なしで使う場合
+
+必要な場合だけ、普段使うユーザーを `docker` グループに追加します。
+
+:::warning[docker グループの権限]
+
+`docker` グループへの所属は、実質的に root 相当の権限を与えます。追加したユーザーの権限で動くプログラムからも Docker にアクセスできます。
+権限を与えたくない場合は `sudo docker ...` のまま使うか、[Rootless モード](https://docs.docker.com/engine/security/rootless/)を検討してください。
+
+:::
+
+通常のユーザーとしてログインしたシェルで実行します。
+
+```bash
+sudo groupadd --force docker
+sudo usermod -aG docker "$USER"
+```
+
+ログアウトして再ログインします。SSH 接続の場合は切断して接続し直してください。デスクトップでは、ターミナルを開き直すだけでは反映されない場合があります。
+再ログイン後に確認します。
+
+```bash
+id -nG
+docker run --rm hello-world
+```
+
+参照: [Linux のインストール後の設定](https://docs.docker.com/engine/install/linux-postinstall/)。
+
+## コンテナーのポートを公開する前に
+
+Docker で公開したポートへの通信は、UFW のルールを迂回する場合があります。`ufw deny` だけでコンテナーへの外部アクセスを防げるとは限りません。
+ローカルからだけ使うサービスなら、たとえば `-p 127.0.0.1:8080:80` のように、ホスト側の待ち受けアドレスを明示します。
+
+ノードや Web サービスを外部公開する場合は、必要なポートと接続元を整理し、[Docker のパケットフィルタリングとファイアウォール](https://docs.docker.com/engine/network/packet-filtering-firewalls/)に沿って設定してください。
+
+## 更新する
+
+APT リポジトリから導入した Docker は、APT で更新します。
+
+:::warning[更新によるコンテナーの稼働への影響]
+
+更新でサービスが再起動し、コンテナーの稼働に影響する場合があります。ノード運用などでは、利用するソフトウェアの対応バージョンとバックアップを確認し、保守時間を確保してください。
+
+:::
+
+```bash
+sudo apt update
+sudo apt install --only-upgrade \
+  docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+```
+
+導入後のノード構築手順は、[ノード運用](../node-operation/index.md)を参照してください。
