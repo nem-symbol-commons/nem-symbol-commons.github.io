@@ -218,4 +218,4 @@ Faucet の払い出し、公開 Testnet への送信と取り込みの一連の�
 - [SDK 3.3.3 の送信 JSON 生成](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/nem/TransactionFactory.js)
 - [SDK 3.3.3 の手数料計算](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/nem/FeeCalculator.js)
 - [NIS API](https://nemproject.github.io/)
-- [NEM の手動トランザクション構築ガイド](https://docs.nemtest.net/en/devbook/transactions/manual-transaction-creation/)
+- [NEM の手動トランザクション構築ガイド](https://docs.nemtest.net/ja/devbook/transactions/manual-transaction-creation/)

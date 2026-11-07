@@ -11,7 +11,7 @@ tags:
 
 ビルド済みの NEM(NIS1)ノードを Ubuntu 26.04 LTS（amd64）にインストールします。
 
-NIS v0.6.102 を対象とします。現在の要件は [ノード構築ガイド](https://docs.nemtest.net/en/userbook/node/install/) と [リリース](https://github.com/NemProject/nem/releases/tag/v0.6.102) を確認してください。
+NIS v0.6.102 を対象とします。現在の要件は [ノード構築ガイド](https://docs.nemtest.net/ja/userbook/node/install/) と [リリース](https://github.com/NemProject/nem/releases/tag/v0.6.102) を確認してください。
 `nem.folder` の保存先とサービス実行ユーザーの書き込み権限を合わせ、`nis.bootKey` を含む設定ファイルは公開しないでください。
 
 ## 必要パッケージと作業ユーザー
@@ -80,7 +80,7 @@ NEM NanoWallet で、設定に使う委任用アカウントの秘密鍵を確�
 3. `Show delegated account keys` を選び、ウォレットのパスワードを入力して委任秘密鍵を表示します。
 
 表示された委任秘密鍵を、以下の `YOUR_DELEGATED_PRIVATE_KEY` に設定します。**資産を持つ主アカウントの秘密鍵は使わないでください。**
-画面の項目名は英語表示で記載しています。[公式の委任秘密鍵の確認手順](https://docs.nemtest.net/en/userbook/node/supernode-program/)も参照してください。
+画面の項目名は英語表示で記載しています。[公式の委任秘密鍵の確認手順](https://docs.nemtest.net/ja/userbook/node/supernode-program/)も参照してください。
 
 ### コンフィグファイルの作成と編集(メインネット)
 
@@ -212,7 +212,7 @@ curl -s http://127.0.0.1:7890/chain/height | jq
 ```
 
 応答の `height` を、**同じネットワーク**の[ノードリスト](#ノードリスト)にある他ノードの高さと比較します。時間を置いて繰り返し、高さが増えて追いつくことを確認してください。差が縮んでいる間は同期中です。
-初回同期には時間がかかります。同期完了後にハーベスティングやスーパーノード登録へ進みます。[公式の同期・監視手順](https://docs.nemtest.net/en/userbook/node/install/#synchronization)も参照してください。
+初回同期には時間がかかります。同期完了後にハーベスティングやスーパーノード登録へ進みます。[公式の同期・監視手順](https://docs.nemtest.net/ja/userbook/node/install/#synchronization)も参照してください。
 
 ### 停止
 

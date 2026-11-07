@@ -62,7 +62,7 @@ nodeCommonName = My Symbol Peer
 
 Shoestring 0.2.4 の[ハーベスター設定処理](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/internal/HarvesterConfigurator.py)では、この指定により所有者用のリモート鍵・VRF 鍵を生成せず、`enableAutoHarvesting = false` にします。`features = API | HARVESTER` は維持するため、所有者を含む委任者からの委任を受け付ける構成です。
 
-受け入れ専用のノード所有者に 10,000 XYM の保有は必須ではありません。ハーベストする委任者側には、Mainnet の資格要件、リモート鍵・VRF 鍵のリンク、委任先へのノード鍵リンク、Persistent Delegation Request が必要です。ノード側の枠や優先順位によって受け入れ結果は変わります。背景は[公式のハーベスティング解説](https://docs.symboltest.net/en/textbook/harvesting/)を参照してください。
+受け入れ専用のノード所有者に 10,000 XYM の保有は必須ではありません。ハーベストする委任者側には、Mainnet の資格要件、リモート鍵・VRF 鍵のリンク、委任先へのノード鍵リンク、Persistent Delegation Request が必要です。ノード側の枠や優先順位によって受け入れ結果は変わります。背景は[公式のハーベスティング解説](https://docs.symboltest.net/ja/textbook/harvesting/)を参照してください。
 
 所有者自身がハーベストする場合の操作は、構築後の[委任の案内](./shoestring-start.mdx#delegation)を参照してください。
 
@@ -118,7 +118,7 @@ minFeeMultiplier = 100
 
 `maxUnlockedAccounts` は委任の受け入れ枠の設定です。ここでは枠を 10 とする例を示しています。運用方針に合わせて変更してください。
 
-`beneficiaryAddress` は、このノードが生成したブロックのハーベスティング報酬から、**ノード側に分配される分の受取アドレス**です。委任者のアドレスや、委任を受け付けるためのノード公開鍵を指定する項目ではありません。[報酬分配の仕組み](https://docs.symboltest.net/en/textbook/harvesting/#reward-distribution)に従って支払われ、受け入れ専用ノードでも運営者の受取先として設定できます。
+`beneficiaryAddress` は、このノードが生成したブロックのハーベスティング報酬から、**ノード側に分配される分の受取アドレス**です。委任者のアドレスや、委任を受け付けるためのノード公開鍵を指定する項目ではありません。[報酬分配の仕組み](https://docs.symboltest.net/ja/textbook/harvesting/#reward-distribution)に従って支払われ、受け入れ専用ノードでも運営者の受取先として設定できます。
 
 `YOUR_BENEFICIARY_ADDRESS` は、運営者が管理する Symbol Mainnet のアドレスに置き換えてください。ウォレットなどで管理している、ノードのメインアカウントとは別のアドレスも使えます。**受取先の秘密鍵をサーバーへ置く必要はありません。** ここで指定するのはアドレスだけで、分配割合はネットワークの設定によって決まります。ノード側の受取先を指定しない場合は値を空欄にできますが、その場合は運営者用の受取先を設定したことにはなりません。
 

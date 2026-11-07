@@ -37,7 +37,7 @@ NEM ではネームスペースとモザイク名の組、Symbol では数値 ID
 XEM / XYM の可分性は 6 で、`1 XEM` / `1 XYM` は最小単位の `1,000,000` に相当します。
 API では数量を最小単位の整数で扱います。他のモザイクでは、可分性に応じて換算します。
 
-参照：[NEM Mosaics](https://docs.nemtest.net/en/textbook/mosaics/)、[Symbol Mosaic](https://docs.symbol.dev/concepts/mosaic.html)。
+参照：[NEM Mosaics](https://docs.nemtest.net/ja/textbook/mosaics/)、[Symbol Mosaic](https://docs.symbol.dev/concepts/mosaic.html)。
 
 ## ネームスペース
 
@@ -47,7 +47,7 @@ NEM ではモザイクの名前付けに使います。Symbol ではアドレス
 **エイリアス**は、Symbol のネームスペースとアドレスまたはモザイク ID との関連付けです。
 参照先は変更でき、ネームスペースには有効期間があります。
 
-参照：[NEM Namespaces](https://docs.nemtest.net/en/textbook/namespaces/)、[Symbol Namespace](https://docs.symbol.dev/concepts/namespace.html)。
+参照：[NEM Namespaces](https://docs.nemtest.net/ja/textbook/namespaces/)、[Symbol Namespace](https://docs.symbol.dev/concepts/namespace.html)。
 
 ## トランザクション・ブロック・ハーベスト
 
@@ -67,7 +67,7 @@ NEM ではモザイクの名前付けに使います。Symbol ではアドレス
 **委任ハーベスト**は、別のノードにブロック生成を任せてハーベストに参加する仕組みです。
 送金用の秘密鍵をノード管理者に渡す必要はありません。
 
-参照：[Symbol Harvesting](https://docs.symbol.dev/concepts/harvesting.html)、[NEM Consensus](https://docs.nemtest.net/en/textbook/consensus/)。
+参照：[Symbol Harvesting](https://docs.symbol.dev/concepts/harvesting.html)、[NEM Consensus](https://docs.nemtest.net/ja/textbook/consensus/)。
 
 ## 受付・未承認・承認・ファイナライズ
 

@@ -214,7 +214,7 @@ Light API の起動前は転送先へ接続できず、nginx の応答が 502 �
 
 ## Full API を公開する場合の WebSocket 設定
 
-**この節は Full API を公開する場合だけ追加します。** 本記事の Light API 構成では不要です。nginx の設定だけで Light API に WebSocket 機能を追加することはできません。Full API 本体の構築は、[公式の構築手順](https://docs.symboltest.net/en/userbook/shoestring/quickstart/)を参照してください。
+**この節は Full API を公開する場合だけ追加します。** 本記事の Light API 構成では不要です。nginx の設定だけで Light API に WebSocket 機能を追加することはできません。Full API 本体の構築は、[公式の構築手順](https://docs.symboltest.net/ja/userbook/shoestring/quickstart/)を参照してください。
 
 Symbol の [WebSocket 接続先](https://docs.symbol.dev/api.html#websockets) は、REST と同じホスト・ポートの `/ws` です。この例では `wss://YOUR_NODE_DOMAIN:3001/ws` を利用者へ案内します。3000 番では `ws://YOUR_NODE_DOMAIN:3000/ws` でも接続できますが、通信は暗号化されません。
 

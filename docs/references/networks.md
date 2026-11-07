@@ -111,4 +111,4 @@ curl --fail-with-body --max-time 15 "$NEM_NODE/status"
 公開ポートは運営者やリバースプロキシ構成によって変わります。443 で HTTPS を提供する構成もあります。
 この表は接続先を選ぶための目安であり、すべてのポートを外部公開するためのファイアウォール設定ではありません。
 
-参照: [Symbol ノード設定](https://docs.symbol.dev/guides/network/configuring-node-properties.html)、[REST Gateway](https://docs.symbol.dev/api.html)、[NIS1 ノード構築ガイド](https://docs.nemtest.net/en/userbook/node/install/)。
+参照: [Symbol ノード設定](https://docs.symbol.dev/guides/network/configuring-node-properties.html)、[REST Gateway](https://docs.symbol.dev/api.html)、[NIS1 ノード構築ガイド](https://docs.nemtest.net/ja/userbook/node/install/)。

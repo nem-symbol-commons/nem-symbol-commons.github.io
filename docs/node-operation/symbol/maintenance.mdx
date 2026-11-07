@@ -116,7 +116,7 @@ python -m shoestring renew-certificates \
 
 `--retain-node-key` は委任先のノード公開鍵を維持する指定です。[証明書更新の実装](https://github.com/symbol/product/blob/d46e77a8ab72d7d935da0aa12a0785873e9692fe/tools/shoestring/shoestring/commands/renew_certificates.py)を参照してください。
 成功後に証明書の期限が更新され、ノード公開鍵が維持されていることを確認して再開し、CA 鍵を再び退避します。環境変数で入力した場合は `unset SYMBOL_CA_PASSWORD` も実行します。
-CA 自身の更新は[公式の証明書更新手順](https://docs.symboltest.net/en/userbook/shoestring/maintain/#tls-certificate-renewal)を参照してください。
+CA 自身の更新は[公式の証明書更新手順](https://docs.symboltest.net/ja/userbook/shoestring/maintain/#tls-certificate-renewal)を参照してください。
 
 ## HTTPS 証明書の自動更新を確認する
 
@@ -132,7 +132,7 @@ sudo journalctl -u certbot.service --since "7 days ago" --no-pager
 ## Shoestring とノードを更新する
 
 Shoestring の Python パッケージと Docker 上のノードソフトウェアは別々に更新します。
-更新先のリリース内容・互換性を確認し、停止・バックアップ後に[公式の更新手順](https://docs.symboltest.net/en/userbook/shoestring/maintain/#updating-node-software)へ進んでください。
+更新先のリリース内容・互換性を確認し、停止・バックアップ後に[公式の更新手順](https://docs.symboltest.net/ja/userbook/shoestring/maintain/#updating-node-software)へ進んでください。
 
 公式例の `upgrade` は、本ガイドの配置に合わせて `--config ./shoestring/shoestring.ini --overrides ./shoestring/overrides.ini --directory .` と読み替えます。
 Testnet では `--package sai`、REST の独自設定がある場合は `--rest-overrides ./shoestring/rest_overrides.json` も渡してください。[併設例](./network-coexistence.mdx)の Testnet では両方が必要です。REST の設定ファイルは、配置するだけでは更新時に再適用されません。
@@ -186,6 +186,6 @@ docker compose -p "$NODE_PROJECT_NAME" logs --tail=100
 ```
 
 状態・同期状況と、併設している別ノードへの影響を確認します。データ削除や `down -v` は復旧手順として安易に実行しないでください。
-復旧できない場合はログを保存し、[公式の復旧手順](https://docs.symboltest.net/en/userbook/shoestring/quickstart/#node-recovery)を参照します。
+復旧できない場合はログを保存し、[公式の復旧手順](https://docs.symboltest.net/ja/userbook/shoestring/quickstart/#node-recovery)を参照します。
 
-Voting 鍵の更新などは[公式の保守ガイド](https://docs.symboltest.net/en/userbook/shoestring/maintain/)を参照してください。
+Voting 鍵の更新などは[公式の保守ガイド](https://docs.symboltest.net/ja/userbook/shoestring/maintain/)を参照してください。

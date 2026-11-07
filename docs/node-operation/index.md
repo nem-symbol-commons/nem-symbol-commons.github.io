@@ -13,7 +13,7 @@ NEM(NIS1)と Symbol の手順は、対象チェーンやネットワーク、利
 対象ネットワーク、ノードの役割、ソフトウェアのバージョンを確認してください。
 既存ノードの変更では、設定とデータのバックアップ、復旧方法、サービスへの影響も確認します。
 
-- [Symbol のノード構築ガイド](https://docs.symboltest.net/en/userbook/shoestring/quickstart/): Symbol の構築手順を探すための参照先。
+- [Symbol のノード構築ガイド](https://docs.symboltest.net/ja/userbook/shoestring/quickstart/): Symbol の構築手順を探すための参照先。
 - [リファレンス](../references/index.md): 実装と関連資料を探す。
 - [トラブルシューティング](../troubleshooting/index.md): 症状から調査方法を探す。
 

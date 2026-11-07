@@ -39,7 +39,7 @@ NEM のモザイクは、`namespaceId` とモザイク名の組で識別しま�
 Symbol のモザイクは 64 ビットの ID で識別し、人間が読みやすい名前はネームスペースをエイリアスとして関連付けます。
 モザイク名やエイリアスだけを見て、チェーンや資産が同じだと判断しないでください。
 
-参照: [NEM Mosaics](https://docs.nemtest.net/en/textbook/mosaics/)、[Symbol Mosaic](https://docs.symbol.dev/concepts/mosaic.html)、[Symbol Namespace](https://docs.symbol.dev/concepts/namespace.html)。
+参照: [NEM Mosaics](https://docs.nemtest.net/ja/textbook/mosaics/)、[Symbol Mosaic](https://docs.symbol.dev/concepts/mosaic.html)、[Symbol Namespace](https://docs.symbol.dev/concepts/namespace.html)。
 
 ## トランザクションと拡張機能
 
@@ -60,7 +60,7 @@ Symbol ではメタデータやアカウント・モザイク制限なども独�
 NEM に Symbol と同じ投票鍵やファイナライズ API があると仮定してはいけません。
 利用するチェーンの確認基準を決め、単に HTTP 送信が成功したことと、ブロックに取り込まれたことを分けて扱ってください。
 
-参照: [NEM Consensus](https://docs.nemtest.net/en/textbook/consensus/)、[Symbol Harvesting](https://docs.symbol.dev/concepts/harvesting.html)、[Symbol のファイナライズ実装](https://github.com/symbol/symbol/tree/main/client/catapult/extensions/finalization)。
+参照: [NEM Consensus](https://docs.nemtest.net/ja/textbook/consensus/)、[Symbol Harvesting](https://docs.symbol.dev/concepts/harvesting.html)、[Symbol のファイナライズ実装](https://github.com/symbol/symbol/tree/main/client/catapult/extensions/finalization)。
 
 ## コード例を選ぶとき
 
