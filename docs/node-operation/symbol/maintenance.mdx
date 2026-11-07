@@ -1,0 +1,191 @@
+---
+title: ノードの保守
+description: Symbol ノードの日常確認、停止・再開、バックアップ、証明書更新と障害時の対応。
+slug: /node-operation/symbol/maintenance
+sidebar_position: 9
+tags:
+- Symbol
+- Docker
+---
+
+Ubuntu 26.04 LTS・Shoestring 0.2.4 で構築した Mainnet/Testnet ノードの基本的な保守を扱います。
+ノードの操作は `symbol` ユーザー、ホストの nginx・Certbot・OS の操作は管理者が行います。
+
+## 操作対象を確認する
+
+ノードの作業ディレクトリへ移動し、仮想環境を有効にします。併設例の Testnet は `~/symbol-node-testnet` に読み替えてください。
+
+```bash
+cd ~/symbol-node
+umask 077
+source .venv/bin/activate
+docker compose ls --all
+```
+
+`YOUR_COMPOSE_PROJECT_NAME` を**既存のプロジェクト名**に置き換えます。併設例の Testnet は `testnet` です。
+
+```bash
+NODE_PROJECT_NAME=YOUR_COMPOSE_PROJECT_NAME
+docker compose -p "$NODE_PROJECT_NAME" ps -a
+docker compose -p "$NODE_PROJECT_NAME" config
+```
+
+想定したコンテナとデータの参照先が表示されることを確認します。以降は同じシェルとディレクトリで操作してください。
+`YOUR_NODE_DOMAIN` は、対象ノードの公開ドメイン名に置き換えます。
+
+## 状態とログを確認する
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" ps -a
+docker compose -p "$NODE_PROJECT_NAME" logs --tail=100 --timestamps
+python -m shoestring health \
+  --config ./shoestring/shoestring.ini --directory .
+df -h
+```
+
+サービスを絞る場合は、`logs --tail=100 client` のように末尾に指定します。Light API は `client`・`rest-api`、Full API は加えて `db`・`broker` などを確認します。
+`health` の API 検査は、本ガイドの設定では公開ホスト名の HTTP 3000 番を使います。失敗した場合は nginx や接続経路も確認してください。
+
+管理者は、ホスト側のエラーも確認します。
+
+```bash
+sudo tail -n 100 /var/log/nginx/YOUR_NODE_DOMAIN.error.log
+sudo journalctl -u docker.service --since "1 hour ago" --no-pager
+```
+
+## 同期状況を確認する
+
+対象ノードの公開 API で高さを取得し、**同じネットワーク**の情報源と比較します。
+
+```bash
+curl -fsS https://YOUR_NODE_DOMAIN:3001/chain/info
+```
+
+1 分程度の間隔で少なくとも 3 回確認し、高さが増えるか、比較先に追いついて小さい差を保つかを見ます。大きな差が縮んでいれば同期中です。自ノードが止まる、または差が広がり続ける場合は、Peer 接続・空き容量・ログを調べます。
+比較先の取得時刻と更新状況も確認し、一度の高さの完全一致を条件にしないでください。Mainnet の例として [Symbol Explorer](https://symbol.fyi/) がありますが、Testnet の比較先としてそのまま使いません。
+
+## 停止と再開
+
+停止後にコンテナの終了状態とログを確認します。ノードの保存処理を待つため、停止には時間がかかる場合があります。
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" stop
+docker compose -p "$NODE_PROJECT_NAME" ps -a
+docker compose -p "$NODE_PROJECT_NAME" logs --tail=100
+```
+
+再開は次のとおりです。起動後は状態・ログ・同期状況を確認します。
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" up -d
+docker compose -p "$NODE_PROJECT_NAME" ps
+```
+
+`restart: unless-stopped` を設定していても、手動停止したコンテナは OS 再起動だけでは復帰しません。
+
+## 設定と鍵をバックアップする {/* #backup */}
+
+更新や復旧の前にノードを正常停止し、次のファイルをアクセス制限した場所へ保存します。
+
+| 対象 | 保存するもの |
+| --- | --- |
+| 設定・証明書・鍵 | `shoestring/`、`userconfig/`、`keys/`、退避済みの `ca.key.pem` |
+| 起動設定 | 通常用・復旧用の Compose ファイルと override、`.env` など独自に追加した設定 |
+| 委任情報 | `data/harvesters.dat`（存在する場合）。対応するノード鍵と一緒に保存 |
+| バージョン情報 | Shoestring・Python の版、`pip freeze` の出力、使用中の Docker イメージ |
+
+秘密鍵を含むバックアップはサーバー外にも保管します。設定と鍵だけではチェーンデータを元に戻せません。
+データも復元する必要がある場合は、停止中に `data/`、Full API では `dbdata/` も含めた一貫したスナップショットなどを取得してください。
+
+## Peer 証明書を更新する {/* #peer-certificates */}
+
+Peer 通信の証明書期限を確認します。nginx の HTTPS 証明書とは別です。
+
+```bash
+openssl x509 -in ./keys/cert/node.crt.pem -noout -dates
+```
+
+停止・バックアップ後、同じメインアカウントの CA 鍵を安全な一時配置先へ戻します。
+暗号化 CA 鍵の場合は、[パスフレーズ入力](./main-account.mdx#ca-password-input)を同じシェルで行ってください。
+
+```bash
+python -m shoestring renew-certificates \
+  --config ./shoestring/shoestring.ini --directory . \
+  --ca-key-path /path/to/secure/ca.key.pem --retain-node-key --force
+```
+
+`--retain-node-key` は委任先のノード公開鍵を維持する指定です。[証明書更新の実装](https://github.com/symbol/product/blob/d46e77a8ab72d7d935da0aa12a0785873e9692fe/tools/shoestring/shoestring/commands/renew_certificates.py)を参照してください。
+成功後に証明書の期限が更新され、ノード公開鍵が維持されていることを確認して再開し、CA 鍵を再び退避します。環境変数で入力した場合は `unset SYMBOL_CA_PASSWORD` も実行します。
+CA 自身の更新は[公式の証明書更新手順](https://docs.symboltest.net/en/userbook/shoestring/maintain/#tls-certificate-renewal)を参照してください。
+
+## HTTPS 証明書の自動更新を確認する
+
+管理者のセッションで Certbot のタイマーとログを確認します。
+
+```bash
+sudo systemctl list-timers --all certbot.timer
+sudo journalctl -u certbot.service --since "7 days ago" --no-pager
+```
+
+ドメインや認証設定を変更した場合は、[nginx 記事の自動更新設定](./nginx.mdx)に沿って更新テストを行います。
+
+## Shoestring とノードを更新する
+
+Shoestring の Python パッケージと Docker 上のノードソフトウェアは別々に更新します。
+更新先のリリース内容・互換性を確認し、停止・バックアップ後に[公式の更新手順](https://docs.symboltest.net/en/userbook/shoestring/maintain/#updating-node-software)へ進んでください。
+
+公式例の `upgrade` は、本ガイドの配置に合わせて `--config ./shoestring/shoestring.ini --overrides ./shoestring/overrides.ini --directory .` と読み替えます。
+Testnet では `--package sai`、REST の独自設定がある場合は `--rest-overrides ./shoestring/rest_overrides.json` も渡してください。[併設例](./network-coexistence.mdx)の Testnet では両方が必要です。REST の設定ファイルは、配置するだけでは更新時に再適用されません。
+
+Shoestring の `upgrade` は Compose 定義と `userconfig/` などを再生成します。独自設定・override・公開ポートを確認してから起動し、状態と同期を確認します。
+失敗した場合は不完全な構成を起動せず、設定と鍵のバックアップ、更新前のイメージ、チェーンデータの互換性を確認して復元方針を決めてください。
+
+## 障害から復旧する
+
+まずログ、空き容量、設定を確認します。ポート競合や設定ミスはリカバリーでは解決しません。
+復旧処理が必要な場合は通常サービスを停止し、[バックアップ](#backup)を取得してから進めます。
+
+### 復旧用構成を確認する
+
+通常用の override は重ねず、生成された復旧用 Compose ファイルを使います。
+独自ポートやネットワークを使う場合は、[併設例](./network-coexistence.mdx)のように復旧用 override も用意します。
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" stop
+docker compose -p "$NODE_PROJECT_NAME" ps -a
+docker compose -p "$NODE_PROJECT_NAME" -f docker-compose-recovery.yaml config
+```
+
+Light API は `client`、Full API は `db`・`initiate`・`client` の構成です。データ・鍵の参照先が通常構成と一致し、ほかのノードとポートやネットワークが競合しないことを確認します。
+
+### 復旧処理を実行する
+
+復旧用 override が不要な構成では、次のコマンドでリカバリーを起動します。
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" \
+  -f docker-compose-recovery.yaml \
+  up --abort-on-container-exit
+```
+
+併設例など、復旧用 override を使う場合は、代わりに次を実行します。事前の構成確認でも同じ 2 ファイルを指定してください。
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" \
+  -f docker-compose-recovery.yaml \
+  -f docker-compose-recovery.override.yaml \
+  up --abort-on-container-exit
+```
+
+復旧処理を途中で中断せず、終了後に完了ログを確認します。手動中断やエラーがあった場合は、通常起動へ進まないでください。
+正常完了後は、復旧用の `-f` を付けずに通常構成へ戻します。
+
+```bash
+docker compose -p "$NODE_PROJECT_NAME" up -d
+docker compose -p "$NODE_PROJECT_NAME" logs --tail=100
+```
+
+状態・同期状況と、併設している別ノードへの影響を確認します。データ削除や `down -v` は復旧手順として安易に実行しないでください。
+復旧できない場合はログを保存し、[公式の復旧手順](https://docs.symboltest.net/en/userbook/shoestring/quickstart/#node-recovery)を参照します。
+
+Voting 鍵の更新などは[公式の保守ガイド](https://docs.symboltest.net/en/userbook/shoestring/maintain/)を参照してください。

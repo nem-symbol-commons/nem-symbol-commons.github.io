@@ -1,0 +1,126 @@
+---
+title: ノード環境の生成と Compose 設定
+description: ノード環境を生成し、公開ポートと再起動方針を設定します。
+slug: /node-operation/symbol/shoestring-setup
+sidebar_position: 7
+tags:
+- Symbol
+---
+
+**操作ユーザー：SSH でログインした `symbol` ユーザー。作業場所：`~/symbol-node`。**
+
+[おすすめの構成](./node-types.mdx#recommended-configuration)の対象環境を確認し、[メインアカウントの準備](./main-account.mdx)まで完了してから進めてください。
+
+作業ディレクトリで `source .venv/bin/activate` を実行したシェルを使います。
+
+## ノードをセットアップする（setup）
+
+ここまでの設定と鍵から実行環境を生成します。
+
+:::warning
+既存の鍵・データがある状態で、新規構築用の `setup` を無条件に再実行しないでください。既存の配置先がある場合は、状態とバックアップを確認してから対応します。
+
+:::
+
+`setup` の前に、設定値の置換漏れを確認します。
+
+```bash
+grep -n 'YOUR_' shoestring/overrides.ini
+```
+
+一致した行が表示された場合は修正し、何も表示されず読み取りエラーもないことを確認してから進みます。[Shoestring 0.2.4 の生成処理](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/commands/setup.py) はホスト名の名前解決を行い、解決できなければ失敗します。名前解決できても意図した接続先とは限らないため、`host` が自分のノードの公開ドメインで、DNS が意図したサーバーを指していることも確認してください。
+
+`userId`・`groupId` は、`symbol` ユーザーで実行した `init` の生成値を維持します。別ユーザーで生成した設定を流用する場合の照合は、[ノード設定の説明](./shoestring-config.mdx)を参照してください。
+
+暗号化 PEM を使う場合は、[環境変数へのパスフレーズ入力](./main-account.mdx#ca-password-input)を同じシェルで済ませてから実行します。
+
+```bash
+python -m shoestring setup \
+  --config ./shoestring/shoestring.ini \
+  --overrides ./shoestring/overrides.ini \
+  --package mainnet \
+  --directory . \
+  --ca-key-path ./ca.key.pem
+```
+
+暗号化 PEM の場合は、実行の成功・失敗を確認してから `unset SYMBOL_CA_PASSWORD` で入力値を削除します。失敗した場合は後続の起動手順へ進まず、原因を確認してください。
+
+ネットワーク設定・ノード証明書・Compose 定義などが生成されます。`harvester = none` のため、所有者用のハーベスト鍵は生成しません。
+
+```bash
+ls -la
+docker compose config --services
+```
+
+Light API 構成では `client`・`rest-api` の 2 サービスが表示されます。Peer+Full API 構成（`lightApi = false`）では `db`（MongoDB）・`initiate`・`client`・`broker`・`rest-api` の 5 サービスです。どちらも `apiHttps = false` のため、`rest-api-https-proxy` はありません。
+
+**次の Compose override で REST を `127.0.0.1:53000` へ変更するまで、`docker compose up` を実行しないでください。** 生成直後の Compose 定義では REST がホストの 3000 番へ公開され、nginx の待受と衝突します。公開ポートと再起動方針を保存してから起動します。
+
+## Compose override を作る（公開ポート・自動再起動） {/* #compose-override */}
+
+nginx が 3000 番・3001 番を使うため、REST Gateway の公開先をループバック 53000 番へ変更します。同じ override で自動再起動も設定します。
+
+### 公開ポートと自動再起動を override へ保存する
+
+Shoestring が生成する `docker-compose.yaml` はそのまま保持し、同じディレクトリに `docker-compose.override.yaml` を作成します。通常の `docker compose` コマンドは両方を読み込むため、基本定義が再生成されても、この設定が残ります。
+
+```bash
+vi docker-compose.override.yaml
+```
+
+既に同名の override がある場合は、既存の設定を確認してから統合してください。
+
+次のファイル全体を保存します。HTTPS プロキシのサービスは追加しません。
+
+```yaml title="docker-compose.override.yaml"
+services:
+  client:
+    restart: unless-stopped
+  rest-api:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:53000:3000"
+```
+
+Peer+Full API 構成の場合は、同じファイルの `services` 内に次も追加します。`client`・`rest-api` の設定は上と共通です。
+
+```yaml title="Peer+Full API 構成の場合に services 内へ追加"
+  db:
+    restart: unless-stopped
+  broker:
+    restart: unless-stopped
+```
+
+初期化用の `initiate` には再起動方針を追加しません。MongoDB の公開先は、生成元の `127.0.0.1:27017:27017` を維持します。
+
+[`!override`](https://docs.docker.com/reference/compose-file/merge/#replace-value) は Compose 2.24.4 以降で使える、ポート設定を置き換える指定です。通常のマージでは全インターフェースへの `3000:3000` が残る可能性があるため、これをループバック限定の設定へ置き換えます。[サーバーの準備](./server-preparation.mdx)の `docker compose version` が対応版であることを確認してください。
+
+`127.0.0.1:53000:3000` は、「ホストのループバック 53000 番からコンテナ内の 3000 番へ転送する」という意味です。コンテナ内の REST 設定のポートは 3000 番のままで、nginx と衝突するホスト側のポートだけを変えます。
+
+`client` の `stop_signal: SIGINT` と `stop_grace_period: 300s` は、Shoestring の [Peer テンプレート](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/templates/docker-compose-peer.yaml) で生成されます。[停止猶予](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)を超えると強制終了されるため、300 秒は正常終了を保証する値ではありません。
+
+`restart: unless-stopped` により、稼働中のコンテナは Docker や OS の再起動後に自動復帰する構成になります。手動停止したコンテナは自動復帰せず、`down` で削除したコンテナも再作成されません。再開には `docker compose up -d` が必要です。
+
+### OS シャットダウン時の停止順序
+
+OS シャットダウン時は、systemd → Docker → コンテナの順に停止要求が伝わります。Docker は `client` に `SIGINT` を送り、終了まで最大 300 秒待ちます。[サーバーの準備](./server-preparation.mdx)の `TimeoutStopSec=600s` は、Docker 自体の停止待ち時間に余裕を持たせる設定です。
+
+Peer+Full API 構成でも `client` の停止設定は同じです。`broker` は `SIGINT`・停止猶予 60 秒が [Dual テンプレート](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/templates/docker-compose-dual.yaml) で生成されます。
+
+### Compose 設定を確認する
+
+```bash
+docker compose config
+```
+
+サービス構成が上記の Peer+Light API または Peer+Full API の構成と一致すること、再起動方針、`client` の停止シグナル・猶予、公開ポートを確認します。`rest-api` の公開先が `127.0.0.1:53000` だけであることを確認してから起動します。
+
+ファイアウォールと VPS 側・ルーター側の着信許可は[サーバーの準備](./server-preparation.mdx)で準備済みです。公開ポートが上記の構成と一致していることを確認します。
+
+通常運用中の停止・再開と障害時の操作は[ノードの保守](./maintenance.mdx)を参照してください。
+
+## 次の手順
+
+[起動と動作確認](./shoestring-start.mdx)へ進みます。
+
+同じホストにもう一方のネットワークのノードを追加する場合は、起動前に[Mainnet と Testnet の併設手順](./network-coexistence.mdx) で通常用・復旧用の override を確認してください。

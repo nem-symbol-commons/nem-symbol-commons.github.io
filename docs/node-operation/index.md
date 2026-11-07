@@ -6,7 +6,7 @@ description: ノードの構築・保守・障害対応を扱います。
 ---
 
 ノードの構築・更新・監視・保守・障害対応を扱うカテゴリです。
-NEM（NIS1）と Symbol の手順は、対象チェーンやネットワーク、利用ソフトウェアを分けて整備していきます。
+NEM(NIS1)と Symbol の手順は、対象チェーンやネットワーク、利用ソフトウェアを分けて整備していきます。
 
 ## 手順を選ぶ前に
 
@@ -19,11 +19,21 @@ NEM（NIS1）と Symbol の手順は、対象チェーンやネットワーク�
 
 参照資料の要件やコマンドは、利用するバージョンの情報と照合してください。
 
+## Symbol の新規構築
+
+まず[ノード構成の選び方](symbol/node-types.mdx)で、Peer+Light API・Peer+Full APIと Voting の役割を確認してください。
+
+[おすすめの構成](symbol/node-types.mdx#recommended-configuration)では、Ubuntu 26.04 LTS の委任受入用 Peer+Light API を紹介しています。対象環境と作業の流れを確認し、[サーバーの準備](symbol/server-preparation.mdx)から始まる7ページの構築手順へ進んでください。Peer+Full API・Voting の具体的な手順は、選び方のページから公式資料へ案内しています。
+
+## Symbol の併設と保守
+
+- [Mainnet と Testnet の併設](symbol/network-coexistence.mdx): 同一ホストで運用するためのポート・Docker ネットワークと、通常用・復旧用 override の設定。
+- [ノードの保守](symbol/maintenance.mdx): Mainnet/Testnet 共通の日常確認、停止・再開、バックアップ、証明書更新と障害時の対応。
+
 ## 構築・運用の移行記事
 
 旧 nemnesia の構築メモを移行しています。対象バージョンや未検証箇所は各記事を確認してください。
 
-- NEM（NIS1）: [セットアップ](nem/setup.mdx)、[ビルド](nem/build.mdx)、[スーパーノード登録の旧手順](nem/supernode.mdx)。
-- Symbol: [Shoestring の導入メモ（未完）](symbol/shoestring.mdx)、[Explorer のインストール](symbol/explorer.mdx)。
+- NEM(NIS1): [セットアップ](nem/setup.mdx)、[ビルド](nem/build.mdx)、[スーパーノード登録の旧手順](nem/supernode.mdx)。
 - NodeWatch: [セットアップ](nodewatch/setup.mdx)、[OpenAPI クライアント生成](../references/nodewatch-openapi.mdx)。
 - [Symbol ノード証明書](../security/symbol-node-certificates.mdx)。

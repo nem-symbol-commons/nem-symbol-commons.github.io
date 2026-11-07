@@ -1,0 +1,134 @@
+---
+title: ネットワークとノードの設定
+description: Mainnet の設定を取得し、Light API と委任ハーベスティングの受け入れ設定を行います。
+slug: /node-operation/symbol/shoestring-config
+sidebar_position: 5
+tags:
+- Symbol
+---
+
+**操作ユーザー：SSH でログインした `symbol` ユーザー。作業場所：`~/symbol-node`。**
+
+[おすすめの構成](./node-types.mdx#recommended-configuration)の対象環境を確認し、[Shoestring の導入](./shoestring.mdx) まで完了してから進めてください。
+
+作業ディレクトリで `source .venv/bin/activate` を実行したシェルを使います。
+
+## ネットワーク設定を取得する（init）
+
+Mainnet の設定テンプレートを取得します。
+
+```bash
+mkdir -p shoestring
+python -m shoestring init --package mainnet shoestring/shoestring.ini
+```
+
+`shoestring/shoestring.ini` が生成されます。ここにはネットワーク識別子、使用する Docker イメージ、ノード機能などが含まれます。使用イメージのタグは取得時期によって変わるため、設定ファイルを確認してください。
+
+:::note
+Testnet の場合は `--package sai` を指定します。Mainnet と Testnet は別のネットワークです。混在を避けるため、Testnet 用には**別の作業ディレクトリ**を作り、以降の `setup` の `--package` も `sai` に変更してください。
+
+同じホストで Mainnet と Testnet を動かす場合は、ディレクトリに加えてポートや Docker ネットワークも分けます。[Mainnet と Testnet の併設手順](./network-coexistence.mdx) を確認してください。
+
+:::
+
+## shoestring/shoestring.ini を編集する
+
+`vi` などで編集します。
+
+```bash
+vi shoestring/shoestring.ini
+```
+
+`setup` を実行する前に、**`[imports]`・`[node]` セクションの該当項目だけ**を次のように変更します。委任の受け入れ専用化、Light API の有効化、Shoestring 側の HTTPS の無効化をまとめて設定します。`[network]`、`[images]`、`[services]`、`[transaction]` の値は原則として取得したものを維持します。記載していない項目は削除せず残してください。
+
+```ini title="shoestring/shoestring.ini"
+[imports]
+harvester = none
+
+[node]
+features = API | HARVESTER
+apiHttps = false
+lightApi = true
+
+caCommonName = My Symbol CA
+nodeCommonName = My Symbol Peer
+```
+
+上記は変更箇所の抜粋です。`shoestring/shoestring.ini` 全体をこれだけで上書きしないでください。
+
+### 委任の受け入れ専用にする
+
+`HARVESTER` はハーベスティング拡張を有効にする指定です。この記事では、`setup` **より前に** `[imports]` の `harvester` を `none` に変更し、所有者自身の自動ハーベストを無効にします。
+
+Shoestring 0.2.4 の[ハーベスター設定処理](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/internal/HarvesterConfigurator.py)では、この指定により所有者用のリモート鍵・VRF 鍵を生成せず、`enableAutoHarvesting = false` にします。`features = API | HARVESTER` は維持するため、所有者を含む委任者からの委任を受け付ける構成です。
+
+受け入れ専用のノード所有者に 10,000 XYM の保有は必須ではありません。ハーベストする委任者側には、Mainnet の資格要件、リモート鍵・VRF 鍵のリンク、委任先へのノード鍵リンク、Persistent Delegation Request が必要です。ノード側の枠や優先順位によって受け入れ結果は変わります。背景は[公式のハーベスティング解説](https://docs.symboltest.net/en/textbook/harvesting/)を参照してください。
+
+所有者自身がハーベストする場合の操作は、構築後の[委任の案内](./shoestring-start.mdx#delegation)を参照してください。
+
+### ノードの機能と証明書名を設定する
+
+- `features = API | HARVESTER`: Light API とハーベスティング機能を有効にします。Shoestring では [`PEER` のフラグ値は 0](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/internal/NodeFeatures.py) で、この指定でも Peer ノードとして動作します。
+- `apiHttps = false`: Shoestring 側の HTTPS を無効にし、Light API を HTTP で起動します。HTTPS プロキシは生成せず、管理者がホスト上の nginx で HTTPS 証明書を管理・更新します。
+- `lightApi = true`: Full API ではなく Light API にします。Peer+Full API 構成にする場合は `lightApi = false` にします。**これ単独では API は起動せず、`features` に `API` が必要**です。
+- `caCommonName` / `nodeCommonName`: 生成する証明書の Common Name です。空欄では証明書生成に失敗します。
+
+`userId`・`groupId` は、[`init` を実行したユーザーの UID・GID が自動設定されます](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/commands/init.py)。本記事では `symbol` ユーザーで生成した値をそのまま維持します。`setup` は INI に保存された値を使います。
+別ユーザーで生成した設定を流用する場合は、実際の運用ユーザーの `id -u`・`id -g` と照合してください。これらはコンテナのプロセスとファイル権限に使われ、`umask 077` で作る設定や鍵は、コンテナだけ別の UID・GID にすると読めなくなることがあります。
+
+`API` を指定しても、`lightApi = true` なら**MongoDB を伴う Full API 構成にはなりません**。Shoestring は Peer 用の Compose 定義に Light API を提供する REST Gateway を追加します。本記事では HTTPS プロキシは生成しません。
+
+[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) でホスト側の HTTP 待受を `127.0.0.1:53000` に変更し、nginx から転送します。`apiHttps = false` にするだけでは標準の Compose 定義で 3000 番が全インターフェースへ公開されるため、**[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) の override を作成してから起動**してください。
+
+Symbol の P2P 通信に使うノード証明書は、HTTPS とは別に `setup` で生成されます。
+
+## ノード固有の設定を作る（shoestring/overrides.ini）
+
+`shoestring/shoestring.ini` が Shoestring 自体の設定であるのに対し、`shoestring/overrides.ini` は Catapult の設定を上書きするファイルです。
+
+セクション名は `[設定ファイルの短縮名.セクション名]` の形式です。例えば `[node.localnode]` は `config-node.properties` の `[localnode]` に対応します。
+
+```bash
+vi shoestring/overrides.ini
+```
+
+```ini title="shoestring/overrides.ini"
+[node.localnode]
+host = YOUR_NODE_DOMAIN
+friendlyName = My Symbol Peer
+
+[user.account]
+enableDelegatedHarvestersAutoDetection = true
+
+[harvesting.harvesting]
+maxUnlockedAccounts = 10
+beneficiaryAddress = YOUR_BENEFICIARY_ADDRESS
+
+[node.node]
+minFeeMultiplier = 100
+```
+
+`host` の `YOUR_NODE_DOMAIN` を**実際に管理し、グローバル IP へ名前解決できる DNS 名**に置き換えてください。ここには外部の Peer ノードから到達でき、nginx の HTTPS 証明書にも対応するホスト名を設定します。
+
+`host` を `localhost` にすると外部の Peer ノードから到達できません。nginx への転送をローカルに限定する設定は、[Compose override の設定](./shoestring-setup.mdx#compose-override) の Compose 側で行います。
+
+`friendlyName` は公開するノードの表示名です。`My Symbol Peer` を好きな名前に変更してください。
+
+`enableDelegatedHarvestersAutoDetection = true` は、委任要求の自動検出を有効にします。
+
+`maxUnlockedAccounts` は委任の受け入れ枠の設定です。ここでは枠を 10 とする例を示しています。運用方針に合わせて変更してください。
+
+`beneficiaryAddress` は、このノードが生成したブロックのハーベスティング報酬から、**ノード側に分配される分の受取アドレス**です。委任者のアドレスや、委任を受け付けるためのノード公開鍵を指定する項目ではありません。[報酬分配の仕組み](https://docs.symboltest.net/en/textbook/harvesting/#reward-distribution)に従って支払われ、受け入れ専用ノードでも運営者の受取先として設定できます。
+
+`YOUR_BENEFICIARY_ADDRESS` は、運営者が管理する Symbol Mainnet のアドレスに置き換えてください。ウォレットなどで管理している、ノードのメインアカウントとは別のアドレスも使えます。**受取先の秘密鍵をサーバーへ置く必要はありません。** ここで指定するのはアドレスだけで、分配割合はネットワークの設定によって決まります。ノード側の受取先を指定しない場合は値を空欄にできますが、その場合は運営者用の受取先を設定したことにはなりません。
+
+`minFeeMultiplier` は、このノードが未承認トランザクションを受け入れる際の最低手数料倍率です。`100` は本稿の設定例で、トランザクションの最大手数料が「倍率×サイズ（バイト）」を下回る場合は、他ノードから受信しても未承認キャッシュへ取り込みません。高くすると受け入れるトランザクションが絞られるため、運用方針に合わせて設定します。[手数料の受け入れ条件](https://docs.symbol.dev/guides/exchanges/exchange-REST-troubleshooting.html)も参照してください。
+
+:::warning
+`config-network.properties` などネットワーク共通値を独自に変更すると、他ノードと状態が一致せず、フォークや同期失敗につながります。公開ネットワークでは安易に変更しないでください。
+
+:::
+
+## 次の手順
+
+[メインアカウントの準備](./main-account.mdx)へ進みます。

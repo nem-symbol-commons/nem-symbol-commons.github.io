@@ -1,0 +1,185 @@
+---
+title: メインアカウントの準備
+description: Shoestring で使用するメインアカウントの新規作成と、既存アカウントの引継ぎ。
+slug: /node-operation/symbol/main-account
+sidebar_position: 6
+tags:
+- Symbol
+---
+
+**操作ユーザー：SSH でログインした `symbol` ユーザー。作業場所：`~/symbol-node`。**
+
+[おすすめの構成](./node-types.mdx#recommended-configuration)の対象環境を確認し、[ネットワークとノードの設定](./shoestring-config.mdx)まで完了してから進めてください。
+
+メインアカウントは、ノード運営者が用意する Symbol アカウントです。Linux の `symbol` ユーザーとは別です。
+Shoestring で使用するメインアカウントの秘密鍵を、`ca.key.pem` という PEM ファイルで用意します。
+新しいアカウントを使う場合は「新規作成」、現在のアカウントを使い続ける場合は「既存アカウントの引継ぎ」のどちらか一方を行ってください。
+
+## 前提
+
+作業ディレクトリで `source .venv/bin/activate` を実行し、Shoestring 用の仮想環境を有効にしてください。
+以降のコマンドは、`symbol` ユーザーの `~/symbol-node` で実行します。ただし、Symbol Bootstrap の復号コマンドは既存の Bootstrap ディレクトリで実行します。
+
+:::note[対象バージョン]
+
+コマンドのオプションは `symbol-shoestring` 0.2.4 の公開説明と Symbol Docs を参照しています。
+
+:::
+
+:::warning[既存の鍵を上書きしない]
+
+作業ディレクトリに `ca.key.pem` がある場合は、用途を確認してから進めてください。既存の鍵を使う場合、新規生成や取込みを繰り返す必要はありません。
+秘密鍵をコマンドの引数、シェル履歴、ログ、スクリーンショットに残さないでください。
+
+:::
+
+ファイルを作成する前に、同じシェルで次を実行します。
+
+```bash
+umask 077
+```
+
+## 新規作成
+
+`ca.key.pem` が存在しないことを確認し、パスフレーズで暗号化した Ed25519 の秘密鍵を生成します。
+
+```bash
+openssl genpkey -algorithm ed25519 -aes-256-cbc -out ca.key.pem
+chmod 600 ca.key.pem
+```
+
+[`-aes-256-cbc`](https://docs.openssl.org/3.5/man1/openssl-genpkey/#options) は、保存する秘密鍵を暗号化する指定です。プロンプトでパスフレーズを入力し、確認のため同じ値を再入力してください。パスフレーズは鍵のバックアップとともに安全に保管します。
+
+生成後は「アカウントの確認」へ進み、後述の[暗号化 PEM の設定](#encrypted-pem) も行います。暗号化せずに作成する場合は、上のコマンドから `-aes-256-cbc` を外してください。
+
+## 既存アカウントの引継ぎ
+
+### PEM ファイルがある場合
+
+既存のメインアカウントの秘密鍵を保存した PEM ファイルを、安全な方法で作業ディレクトリにコピーし、`ca.key.pem` として配置します。元のファイルはバックアップとして保持してください。
+
+コピー後はアクセス権を制限し、「アカウントの確認」へ進みます。
+
+```bash
+chmod 600 ca.key.pem
+```
+
+### 秘密鍵を取り込む場合
+
+`ca.key.pem` が存在しないことを確認し、パスフレーズで暗号化して取り込みます。
+
+```bash
+python -m shoestring pemtool --output ca.key.pem --ask-pass
+```
+
+プロンプトに既存メインアカウントの秘密鍵と、PEM ファイルを暗号化するパスフレーズを入力します。秘密鍵やパスフレーズをコマンド行に直接書かないでください。取込み後は、後述の[暗号化 PEM の設定](#encrypted-pem) も行います。
+暗号化せずに取り込む場合は、上のコマンドから `--ask-pass` を外してください。
+
+### Symbol Bootstrap から秘密鍵を確認する場合
+
+既存の Symbol Bootstrap の `target/addresses.yml` で、引き継ぐノードのメインアカウントの秘密鍵を確認します。他の用途の鍵を取り違えないでください。
+
+ファイルが暗号化されている場合は、既存の Bootstrap ディレクトリで次を実行します。`target/addresses_plaintext.yml` が既にある場合は上書きせず、先に用途を確認してください。
+
+```bash
+umask 077
+symbol-bootstrap decrypt \
+  --source target/addresses.yml \
+  --destination target/addresses_plaintext.yml
+```
+
+復号したファイルで秘密鍵を確認したら、新しいノードの作業ディレクトリに戻り、前述の `pemtool` で取り込みます。
+取込み後は Bootstrap ディレクトリで、今回作成した平文ファイルを削除してください。元の暗号化ファイルは保持します。
+
+```bash
+rm -- target/addresses_plaintext.yml
+```
+
+:::note[ノード全体の移行とは別の手順]
+
+メインアカウントの引継ぎだけでは、VRF・remote・voting の鍵やノード設定の移行は完了しません。
+既存ノードから移行する場合は、[構築ガイドの Bootstrap の鍵の取込み手順](https://docs.symboltest.net/en/userbook/shoestring/quickstart/#5-create-the-node-identity) も確認してください。
+
+:::
+
+## アカウントの確認
+
+メインネットの場合は、次のコマンドでアドレスと公開鍵を確認します。プロンプトに PEM ファイルのパスフレーズを入力してください。
+
+```bash
+python -m shoestring pemview --input ca.key.pem --network mainnet --ask-pass
+```
+
+テストネットでは `--network testnet` を指定します。暗号化されていない PEM ファイルの場合は `--ask-pass` を外してください。
+秘密鍵を表示する `--show-private` は、確認には不要です。
+
+既存アカウントを引き継ぐ場合は、利用するネットワークと表示されたアドレスが従来のものと一致することを確認します。一致しない場合は、取込み元の鍵とネットワークの指定を確認し、解決するまで次の構築手順へ進まないでください。
+
+## 暗号化 PEM を使う場合 {/* #encrypted-pem */}
+
+新規作成時に暗号化した場合、`pemtool --ask-pass` で暗号化した場合、既存の暗号化 PEM を引き継ぐ場合は、`shoestring/shoestring.ini` の既存 `[node]` セクションに次を設定します。[`caPassword` は OpenSSL のパスフレーズ指定形式に対応](https://pypi.org/project/symbol-shoestring/0.2.4/#node) しており、この例は環境変数から読み取ります。
+
+```ini title="shoestring/shoestring.ini の既存 node セクション"
+[node]
+caPassword = env:SYMBOL_CA_PASSWORD
+```
+
+暗号化されていない PEM を使う場合は `caPassword` を空欄のまま維持し、この節の入力は不要です。INI やコマンド行にパスフレーズ自体を書かないでください。
+
+### 実行前のパスフレーズ入力 {/* #ca-password-input */}
+
+`~/symbol-node` に、パスフレーズを入力するための Bash スクリプトを作成します。ファイルに保存するのは入力処理だけで、パスフレーズ自体は保存しません。
+
+```bash
+vi shoestring/input-ca-passphrase.sh
+```
+
+```bash title="shoestring/input-ca-passphrase.sh"
+#!/usr/bin/env bash
+# source で読み込んで使います。
+set +x
+unset SYMBOL_CA_PASSWORD
+if IFS= read -r -s -p 'CA 鍵のパスフレーズ: ' SYMBOL_CA_PASSWORD && [ -n "$SYMBOL_CA_PASSWORD" ]; then
+  printf '\n'
+  export SYMBOL_CA_PASSWORD
+else
+  printf '\n入力できませんでした。再入力してください。\n' >&2
+  unset SYMBOL_CA_PASSWORD
+  return 1
+fi
+```
+
+`setup` の直前に、同じ `symbol` ユーザーの Bash で次を実行します。シェルのトレースを止め、画面に表示せず入力した値を環境変数へ渡します。入力に失敗した場合は次へ進まず、再実行してください。
+
+```bash
+source shoestring/input-ca-passphrase.sh
+```
+
+`source` は現在のシェルに環境変数を設定するために使います。`bash shoestring/input-ca-passphrase.sh` で実行すると、設定した値を呼出元シェルの `setup` に引き継げません。
+
+`pemview --ask-pass` の入力は `setup` に引き継がれません。別のシェルで再開した場合や別ノードを操作する場合も、対象の鍵のパスフレーズを再入力します。
+
+`setup` の成功・失敗を確認したら、次を実行して呼出元シェルからも値を削除します。再試行する場合は、再び入力してください。
+
+```bash
+unset SYMBOL_CA_PASSWORD
+```
+
+[Peer 証明書の更新](./maintenance.mdx#peer-certificates) など、同じ CA 鍵を使う保守でも `caPassword` の設定と実行前の入力が必要です。通常のコンテナ起動には、この環境変数は不要です。
+
+## 鍵の保管と次の手順
+
+`ca.key.pem` を安全な場所へバックアップしてください。`-aes-256-cbc` を外した新規生成と、`--ask-pass` を付けない取込みで作成する PEM ファイルは暗号化されていません。
+
+このガイドでは `[imports] harvester = none` とし、メインアカウント自身の自動ハーベストは行いません。所有者がハーベストするアカウントは、手元のウォレットで別に管理します。
+
+`ca.key.pem` はノード環境の生成で使うため、今は作業ディレクトリに保持します。[起動と動作確認](./shoestring-start.mdx)を終えてから、バックアップを確認してサーバーから退避してください。通常のノード運用には、このファイルは不要です。
+
+## 参照
+
+- [Symbol Docs — Creating and Running a Node](https://docs.symboltest.net/en/userbook/shoestring/quickstart/)
+- [symbol-shoestring 0.2.4 — PEM files / pemtool / pemview](https://pypi.org/project/symbol-shoestring/0.2.4/)
+
+## 次の手順
+
+[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) へ進みます。

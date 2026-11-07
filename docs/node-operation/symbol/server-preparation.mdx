@@ -1,0 +1,165 @@
+---
+title: サーバーの準備
+description: Docker、公開ポート、専用ユーザーと SSH 接続を準備します。
+slug: /node-operation/symbol/server-preparation
+sidebar_position: 2
+tags:
+- Symbol
+---
+
+**操作ユーザー：管理者ユーザー。作業場所：管理者の SSH セッション。**
+
+[おすすめの構成](./node-types.mdx#recommended-configuration)で対象構成と環境を確認してから進めてください。
+
+この節のサーバー側の操作は、管理者権限のあるユーザーで実施します。管理者がすでに SSH 接続できるサーバーを前提とします。SSH サーバーが未導入なら、先に[Ubuntu 公式の OpenSSH ガイド](https://documentation.ubuntu.com/server/how-to/security/openssh-server/) に沿って準備してください。
+
+## OS パッケージを準備する
+
+まず Ubuntu のパッケージを導入します。Python 依存のビルドが必要になった場合に備え、ビルドツールと Python・OpenSSL のヘッダーもここで導入します。
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ca-certificates curl openssl build-essential libssl-dev python3-dev python3-venv \
+  ufw nginx certbot
+```
+
+`python3-dev` は依存パッケージをソースからビルドする際の Python ヘッダーを提供し、[Shoestring の公式導入ガイド](https://docs.symboltest.net/en/userbook/shoestring/install/) でも案内されています。`python3-venv` は Ubuntu 標準の Python で仮想環境を作るために使います。
+
+OpenSSL の版と時刻同期の状態を確認します。
+
+```bash
+openssl version
+timedatectl status
+```
+
+`timedatectl status` の `System clock synchronized` が `yes` になっていることを確認してください。未同期なら、利用中の chrony や systemd-timesyncd などの時刻同期サービスを確認してから構築を進めます。
+
+## Docker を準備する
+
+[開発環境・ツールの「Docker のインストール」](../../development-tools/docker.mdx) に沿って、Docker Engine と Compose プラグインの導入、サービスの起動・自動起動、動作確認を済ませてください。導入済みの場合も、同記事で稼働状態を確認します。
+
+このノード構成では、Compose override の `!override` に対応した **Compose 2.24.4 以降**が必要です。
+
+```bash
+sudo docker compose version
+```
+
+Docker を sudo なしで操作するためのグループ設定は、後述の「`symbol` ユーザーを作成する」で専用ユーザーに対して行います。
+
+## OS 終了時に Docker が停止を待てるようにする
+
+`restart: unless-stopped` は次回起動時の復帰方針で、OS 終了時にノードの保存処理を待つ設定ではありません。[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) ではクライアントへ `SIGINT` を送り、最大 300 秒待つ構成にします。さらに、その途中で systemd が Docker デーモンを強制終了しないよう、管理者が Docker サービスの停止待ち時間を確保します。
+
+以下は[systemd の `TimeoutStopSec`](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html#TimeoutStopSec=) を 600 秒にする例です。この設定は、このホスト上の Docker サービス全体に適用されます。既存の同名ファイルがある場合は上書きせず統合し、すでにより長い待ち時間や `infinity` が設定されている場合は、それを短くしないでください。
+
+```bash
+sudo install -d -m 755 /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/90-symbol-shutdown.conf > /dev/null <<'UNIT'
+[Service]
+TimeoutStopSec=600s
+UNIT
+
+sudo systemctl daemon-reload
+sudo systemctl show docker.service -p TimeoutStopUSec
+sudo docker info --format 'LiveRestoreEnabled={{.LiveRestoreEnabled}}'
+```
+
+`TimeoutStopUSec=10min` を確認します。`daemon-reload` で停止待ち設定を読み込むため、ここで Docker を再起動する必要はありません。以下の停止説明は `LiveRestoreEnabled=false` の通常構成を前提とします。有効にしているホストでは、管理者が既存のデーモン設定とコンテナ終了方法を確認し、この前提に合わせてから進めてください。
+
+**600 秒は systemd が Docker を待つ上限であり、ノードを 600 秒待つ設定ではありません。** ノード自身の猶予は[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) の 300 秒です。他のコンテナの終了にさらに時間がかかるホストでは、その所要時間も考慮して上限を調整してください。
+
+## 公開ポートを準備する
+
+P2P の 7900 番、nginx が待ち受ける 3000 番・3001 番、証明書の取得・自動更新に使う 80 番への着信を許可します。管理者がファイアウォールの状態を確認します。
+
+```bash
+sudo ufw status
+```
+
+UFW が有効なら、SSH の許可設定を維持した上で 7900 番を許可します。
+
+```bash
+sudo ufw allow 7900/tcp
+```
+
+nginx の HTTP 入口を 3000 番、HTTPS を 3001 番にそろえます。Certbot のドメイン確認用に 80 番も許可します。Light API の転送先は[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) で `127.0.0.1:53000` に限定するため、53000 番への外部からの着信許可は追加しません。
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow 3001/tcp
+```
+
+UFW が無効な場合は、SSH 接続を維持できることを確認するまで `ufw enable` を実行しないでください。VPS 側のファイアウォールやルーターでも、IPv4 で必要なポートの着信を許可し、ルーター配下では同じポートをノードのサーバーへ転送します。Docker の公開ポートは UFW と異なる経路で許可される場合があるため、公開範囲は[Compose override の設定](./shoestring-setup.mdx#compose-override) の Compose 定義と VPS 側・ルーター側の設定も含めて確認してください。
+
+## `symbol` ユーザーを作成する
+
+管理者のシェルで、パスワード認証を無効にした専用ユーザーを作成し、Docker を操作できるようにします。すでに `symbol` ユーザーがある場合は、作成を繰り返さずホームディレクトリや用途を確認してください。以下はホームが `/home/symbol` の場合の例です。
+
+```bash
+sudo adduser --disabled-password --comment "" symbol
+sudo usermod -aG docker symbol
+```
+
+:::warning
+[`docker` グループは、実質的にホストの root 権限に相当する操作が可能](https://docs.docker.com/engine/install/linux-postinstall/) です。この手順では、信頼できるノード運用ユーザーとして `symbol` を追加します。`symbol` に sudo 権限は付けませんが、Docker を通じてホストを操作できる点は変わりません。
+
+:::
+
+## 手元の PC で SSH 鍵を用意する
+
+手元の PC で、`symbol` ユーザーへの接続に使う SSH 鍵を用意します。以下は macOS/Linux など OpenSSH を使える環境の例です。同名の鍵がある場合は上書きせず、既存鍵を使うか別名にしてください。既存鍵を使う場合は生成を省略し、以降のファイル名を読み替えます。
+
+```bash
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519_symbol" -C "symbol"
+cat "$HOME/.ssh/id_ed25519_symbol.pub"
+```
+
+生成時は秘密鍵を保護するパスフレーズを設定します。表示された `ssh-ed25519` から始まる公開鍵を 1 行でコピーしてください。**拡張子のない `id_ed25519_symbol` は秘密鍵なので、サーバーへ送りません。**
+
+## サーバーに SSH 公開鍵を登録する
+
+サーバーの管理者シェルで、公開鍵の登録先を用意します。既存の `authorized_keys` がある場合は、登録済みの行を残して追記します。
+
+```bash
+sudo install -d -m 700 -o symbol -g symbol /home/symbol/.ssh
+sudo touch /home/symbol/.ssh/authorized_keys
+sudo chown symbol:symbol /home/symbol/.ssh/authorized_keys
+sudo chmod 600 /home/symbol/.ssh/authorized_keys
+sudo -u symbol vi /home/symbol/.ssh/authorized_keys
+```
+
+エディターで公開鍵を 1 行で追加し、保存します。SSH の `AllowUsers`／`AllowGroups` などでログインを制限している場合は、`symbol` ユーザーの接続も許可してください。
+
+管理者は、初回接続で照合するホスト鍵のフィンガープリントも確認します。標準の Ed25519 ホスト鍵を使う場合の例です。
+
+```bash
+sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+## `symbol` ユーザーで SSH ログインする
+
+**管理者の接続を残したまま**、手元の PC の別ターミナルから接続します。ホスト名を実際の接続先に置き換え、SSH が 22 番以外なら `-p ポート番号` も指定してください。
+
+```bash
+ssh -i "$HOME/.ssh/id_ed25519_symbol" -o IdentitiesOnly=yes \
+  symbol@YOUR_NODE_DOMAIN
+```
+
+初回にホスト鍵の確認が出た場合は、管理者が確認したフィンガープリントと照合してから接続を承認します。ログイン後、サーバー上で次を実行します。
+
+```bash
+whoami
+printf 'HOME=%s\n' "$HOME"
+id
+docker info
+```
+
+`whoami` が `symbol`、`HOME` が `/home/symbol` で、所属グループに `docker` があり、`docker info` が成功することを確認します。管理者と `symbol` ユーザーの接続を両方残してください。**[nginx と HTTPS の設定](./nginx.mdx) は管理者のセッションで実施し、[Shoestring の導入](./shoestring.mdx) からこの `symbol` ユーザーのセッションを使います。** Shoestring の導入と実行は `symbol` ユーザーの仮想環境で行います。
+
+## 次の手順
+
+[nginx と HTTPS の設定](./nginx.mdx) へ進みます。

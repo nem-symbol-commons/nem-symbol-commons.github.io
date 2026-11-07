@@ -1,0 +1,136 @@
+---
+title: 起動と動作確認
+description: ノードを起動して API の応答を確認し、メインアカウントの秘密鍵を退避します。
+slug: /node-operation/symbol/shoestring-start
+sidebar_position: 8
+tags:
+- Symbol
+---
+
+**操作ユーザー：SSH でログインした `symbol` ユーザー。作業場所：`~/symbol-node`。**
+
+[おすすめの構成](./node-types.mdx#recommended-configuration)の対象環境を確認し、[ノード環境の生成と Compose 設定](./shoestring-setup.mdx) まで完了してから進めてください。
+
+作業ディレクトリで `source .venv/bin/activate` を実行したシェルを使います。
+
+## ノードを起動する
+
+`~/symbol-node` で Compose 定義を確認します。エラーがなければ、起動へ進みます。
+
+```bash
+docker compose config
+```
+
+コンテナをバックグラウンドで起動します。稼働中のノードへ再起動方針を追加する場合も、設定を反映する `up -d` によりコンテナが再作成されることがあります。
+
+```bash
+docker compose up -d
+```
+
+コンテナの状態を確認します。
+
+```bash
+docker compose ps
+```
+
+`client`・`rest-api` が起動しているか確認します。ホスト上の nginx はこの Compose の管理対象ではありません。
+
+ログの末尾 100 行を表示し、エラーがないか確認します。`ps` で稼働中でも、初回のブロック同期が完了したとは限りません。
+
+```bash
+docker compose logs --tail=100
+```
+
+最後に、再起動方針を確認します。
+
+```bash
+docker compose ps -q | xargs -r docker inspect \
+  --format '{{.Name}}: {{.HostConfig.RestartPolicy.Name}}'
+```
+
+両サービスの再起動方針が `unless-stopped` と表示されることを確認します。
+
+## 動作確認する {/* #verification */}
+
+### REST Gateway の応答を確認する
+
+ノードのサーバー上で、nginx を経由せず REST Gateway へ直接接続します。Peer+Light API・Peer+Full API のどちらの構成も同じコマンドです。
+
+```bash
+curl --fail --show-error http://127.0.0.1:53000/node/info
+```
+
+ノード情報の JSON が返ることを確認します。取得できない場合は、`docker compose ps` と `docker compose logs --tail=100`、REST の公開先を確認してください。
+
+### nginx 経由の HTTP・HTTPS を確認する
+
+手元の端末から公開 URL へ接続します。`YOUR_NODE_DOMAIN` は実際の公開ドメイン名へ置き換えてください。
+
+```bash
+curl --fail --show-error https://YOUR_NODE_DOMAIN:3001/node/info
+```
+
+HTTPS で JSON が返ることを確認してから、HTTP の入口も確認します。
+
+```bash
+curl --fail --show-error http://YOUR_NODE_DOMAIN:3000/node/info
+```
+
+直接接続では取得でき、公開 URL では取得できない場合は、nginx の転送先・証明書・着信許可と、ホスト別のエラーログを確認してください。
+
+ブラウザでも HTTPS の URL を開き、証明書の表示と、開発者ツールの Network の Protocol 列が `h2` になっていることを確認します。
+
+### Shoestring の health で追加確認する（任意）
+
+```bash
+python -m shoestring health \
+  --config ./shoestring/shoestring.ini \
+  --directory .
+```
+
+`health` は Peer 接続や証明書、API などを検査します。ただし、`apiHttps = false` の場合の [API 検査](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/commands/health.py) は公開ホスト名の HTTP 3000 番を使うため、nginx が正常に動いていない場合や、サーバーから公開 URL へ接続できない場合も失敗します。
+
+初回のブロック同期はバックグラウンドで進みます。API の応答や `health` の成功だけでは、同期完了やハーベスト成功は確認できません。
+
+## 構築後の委任 {/* #delegation */}
+
+公開した `https://YOUR_NODE_DOMAIN:3001/node/info` でノード情報を確認できます。[`nodePublicKey`](https://github.com/symbol/symbol/blob/dev/client/rest/src/routes/light/nodeRoutes.js) は P2P 通信のノード公開鍵で、委任者が Node Key Link で委任先を指定するときに使います。同じ応答の `publicKey` とは区別してください。
+
+ノードを管理する人を「所有者」、自身のアカウントから委任する人を「委任者」とします。
+所有者自身もハーベストする場合は、ノードのメインアカウントとは別のウォレット管理アカウントを使います。資金や委任元の秘密鍵をノードへ置かず、`harvester = none` は維持します。
+
+[保守記事の「同期状況を確認する」](./maintenance.mdx#同期状況を確認する)に沿ってノードの同期完了を確認してから、手元のウォレットのハーベスティング設定でこのノードを委任先に指定します。委任元には Mainnet の資格要件（原則 10,000 XYM 以上と正のインポータンス）を満たすアカウントを使い、リンクなどのトランザクション手数料も用意します。ウォレットが参照する Full API と、ハーベストを委任する本記事の Peer+Light API ノードは役割が異なります。
+
+委任者側では、このノード公開鍵を使うリンクに加え、リモート鍵・VRF 鍵のリンクや委任要求などの操作が必要です。委任者側の操作は[公式の委任ハーベスティング手順](https://docs.symbol.dev/guides/harvesting/activating-delegated-harvesting-manual.html)を参照してください。
+
+## 秘密鍵をバックアップしてサーバーから退避する
+
+**[動作確認](#verification)を終えてから、`ca.key.pem` を安全にバックアップし、サーバーから退避します。**
+
+起動や動作確認に問題がある間は、設定・証明書の調整に使う可能性があるため、バックアップを確保せずに削除しないでください。
+
+- オフライン、または厳格にアクセス制御した場所に保存する
+- バックアップから復元できることを確認する
+- 確認後に限り、稼働サーバー上の `ca.key.pem` を削除する
+- 証明書更新などで再度必要になるためバックアップは保持する
+
+`ca.key.pem` は通常運用中のノードには不要です。一方、`setup` が生成した**通信用の証明書・秘密鍵をまとめて削除してはいけません**。
+
+## 困ったときは
+
+### `docker compose` が実行できない
+
+`docker compose version` を確認します。`permission denied` なら、`symbol` ユーザーで SSH ログインしているか、`id` の表示に `docker` グループが含まれるかを確認してください。管理者がグループへ追加した後に SSH 接続し直すと、所属グループが反映されます。
+
+### `setup` で証明書を作れない
+
+`shoestring/shoestring.ini` の `caCommonName` と `nodeCommonName` が空欄ではないか、`ca.key.pem` の形式と権限が正しいか確認します。
+
+## 構築後の確認範囲
+
+このガイドの到達点は、起動と基本的な API 応答の確認までです。同期完了・実際の委任受け入れ・ハーベスト成功を確認したことにはなりません。対象構成は[おすすめの構成](./node-types.mdx#recommended-configuration)を参照してください。
+
+
+## 構築後の保守
+
+運用中の状態確認、停止・再開、障害からの復旧は[ノードの保守](./maintenance.mdx)を参照してください。

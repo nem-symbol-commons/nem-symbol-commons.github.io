@@ -1,0 +1,422 @@
+---
+title: Mainnet と Testnet を同一ホストで運用する
+description: Shoestring で構築する 2 つのノードのポート、Docker ネットワーク、通常用・復旧用設定を分離します。
+slug: /node-operation/symbol/network-coexistence
+sidebar_position: 10
+tags:
+- Symbol
+- Docker
+---
+
+Mainnet のノードを残したまま Testnet を追加する場合は、作業ディレクトリ、Compose プロジェクト、公開ポート、Docker ネットワークを分けます。
+ここでは Mainnet を `~/symbol-node`、新しい Testnet を `~/symbol-node-testnet` に配置し、Testnet 側を変更します。
+
+**ノード側の操作は `symbol` ユーザーの `~/symbol-node-testnet`、nginx と着信許可の設定は管理者のセッションで実行します。**
+通常の構築は[ノード構成の選び方](./node-types.mdx)から確認してください。Light API と Full API の例は、使う構成の一方だけを適用します。
+
+:::note[対象と検証範囲]
+
+Ubuntu 26.04 LTS・Shoestring 0.2.4・Compose 2.24.4 以降を対象とします。Shoestring の生成テンプレートとの照合と `docker compose config` による検証を行った例です。この記事の手順での実ノードの起動は未検証です。
+Full API の単独構築手順は本站では未整備のため、[公式の構築手順](https://docs.symboltest.net/en/userbook/shoestring/quickstart/)も参照してください。
+
+:::
+
+## 分離する値を決める
+
+| 項目 | 既存の Mainnet の例 | 追加する Testnet の例 |
+| --- | --- | --- |
+| 作業ディレクトリ | `~/symbol-node` | `~/symbol-node-testnet` |
+| Shoestring のパッケージ | `mainnet` | `sai` |
+| Compose プロジェクト名 | 既存の名前を維持 | `testnet` |
+| P2P の公開ポート／コンテナ内ポート | `7900`／`7900` | `7950`／`7950` |
+| REST のホスト側 HTTP 待受 | `127.0.0.1:53000` | `127.0.0.1:63000` |
+| REST のコンテナ内 HTTP ポート | `3000` | `3000` |
+| Docker ネットワーク名 | `catapult-node-network` | `catapult-node-testnet-network` |
+| Docker サブネット | `172.20.0.0/24` | `172.21.0.0/24` |
+| REST コンテナの固定 IP | `172.20.0.25` | `172.21.0.25` |
+| MongoDB のホスト側待受（Full API のみ） | `127.0.0.1:27017` | `127.0.0.1:27018` |
+| 公開ホスト名 | `YOUR_MAINNET_NODE_DOMAIN` | `YOUR_TESTNET_NODE_DOMAIN` |
+
+ポート番号やサブネットはこの手順の例で、Testnet 固有の必須値ではありません。変更する場合は、以降の対応箇所もそろえてください。
+既存の Mainnet の配置先・プロジェクト名・ネットワーク名を、この表に合わせて変更する必要はありません。既存ノードの操作では実際の配置先を使ってください。
+
+事前にホストのポート使用状況、Docker・LAN・VPN のネットワークと経路を確認します。
+
+```bash
+ss -ltn
+docker network ls
+docker network ls -q | xargs -r docker network inspect \
+  --format '{{.Name}}: {{json .IPAM.Config}}'
+ip -4 route
+```
+
+`7950`・`63000`・必要な場合の `27018` が未使用であり、`172.21.0.0/24` が既存のネットワークと重複しないことを確認します。
+CPU・メモリ・ディスク容量と I/O は 2 ノード分を見込みます。ディレクトリを分けても、ホストの資源は共有します。
+
+## Testnet の環境と設定を用意する
+
+### 独立した仮想環境を作る
+
+[サーバーの準備](./server-preparation.mdx)で `python3-venv` を導入済みとし、Ubuntu 標準 Python から Testnet 専用の仮想環境を作ります。既存のノード設定やデータをコピーして初期化しないでください。以下は `~/symbol-node-testnet` がまだ存在しない場合の例です。
+
+```bash
+mkdir ~/symbol-node-testnet
+chmod 700 ~/symbol-node-testnet
+cd ~/symbol-node-testnet
+umask 077
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install 'symbol-shoestring==0.2.4'
+
+mkdir shoestring
+python -m shoestring init --package sai shoestring/shoestring.ini
+```
+
+別のシェルで再開するときも、`symbol` ユーザーで `cd ~/symbol-node-testnet`、`umask 077`、`source .venv/bin/activate` を実行します。Mainnet の仮想環境が有効な場合は、先に `deactivate` してください。
+
+### 構成を選ぶ
+
+`shoestring/shoestring.ini` の `[node]` を編集します。以下は変更箇所の抜粋で、ファイル全体を置き換えるものではありません。
+`userId`・`groupId` は `init` を実行した `symbol` ユーザーの UID・GID が自動設定されるため、そのまま維持します。別ユーザーで生成した設定を流用する場合は、実際の運用ユーザーの値と照合してください。`setup` は INI に保存された値を使います。詳細は[ノード設定の説明](./shoestring-config.mdx)を参照してください。
+
+```ini title="shoestring/shoestring.ini"
+[node]
+features = API | HARVESTER
+caCommonName = My Testnet CA
+nodeCommonName = My Testnet Peer
+apiHttps = false
+lightApi = true
+
+[imports]
+harvester = none
+```
+
+Light API では `lightApi = true`、Full API では `lightApi = false` にします。どちらもホスト上の nginx で HTTPS を終端し、Shoestring の HTTPS プロキシは生成しません。
+この例は委任受け入れ用で、メインアカウント自身の自動ハーベストと Voting は有効にしません。
+ネットワーク識別子などは `sai` で取得した値を維持し、Mainnet の設定・鍵・データを流用しないでください。
+
+### P2P ポートと REST の信頼する IP を変更する
+
+```ini title="shoestring/overrides.ini"
+[node.node]
+port = 7950
+trustedHosts = 127.0.0.1, 172.21.0.25
+localNetworks = 127.0.0.1, 172.21.0.25
+minFeeMultiplier = 100
+
+[user.account]
+enableDelegatedHarvestersAutoDetection = true
+
+[harvesting.harvesting]
+maxUnlockedAccounts = 100
+beneficiaryAddress = YOUR_TESTNET_BENEFICIARY_ADDRESS
+
+[node.localnode]
+host = YOUR_TESTNET_NODE_DOMAIN
+friendlyName = My Testnet Node
+```
+
+`YOUR_TESTNET_NODE_DOMAIN` は、このホストに名前解決できる Testnet 用の公開 DNS 名へ置き換えます。
+`YOUR_TESTNET_BENEFICIARY_ADDRESS` は運営者が管理する **Testnet の報酬受取アドレス**へ置き換えてください。指定しない場合は値を空欄にします。
+秘密鍵をこの設定に記載する必要はありません。
+
+併設のために対応させる値は、P2P の `7950` と REST コンテナの `172.21.0.25` です。`trustedHosts` を空欄にしたり、サブネット全体へ不用意に広げたりせず、必要な接続元に限定します。
+受け入れ枠 100 と手数料倍率 100 は運用方針の例で、併設の必須条件ではありません。意味は[ノード固有の設定](./shoestring-config.mdx)を参照してください。
+
+### REST から接続する P2P ポートも変更する
+
+```json title="shoestring/rest_overrides.json"
+{
+  "apiNode": {
+    "port": 7950
+  }
+}
+```
+
+これは REST Gateway から `client` へ接続するときのポートです。REST の HTTP ポート `3000` や、ホスト側の `63000` とは別です。
+Full API でも MongoDB のコンテナ内ポートは `27017` のままで、REST の `db.url` をホスト側の `27018` に変更する必要はありません。Broker との内部通信も、分離した Docker ネットワーク内で行います。
+
+### 鍵を用意してノード環境を生成する
+
+[メインアカウントの準備](./main-account.mdx)を **`~/symbol-node-testnet` で**行います。同記事の `~/symbol-node` は読み替え、アドレスの確認には `--network testnet` を使ってください。
+
+ドメイン・報酬受取先の置換と設定内容を確認したら、初回の環境生成を実行します。暗号化 PEM を使う場合は、Testnet 側の INI に `caPassword` を設定し、同じシェルで[対象の鍵のパスフレーズを入力](./main-account.mdx#ca-password-input)してください。
+
+```bash
+python -m shoestring setup \
+  --config ./shoestring/shoestring.ini \
+  --overrides ./shoestring/overrides.ini \
+  --rest-overrides ./shoestring/rest_overrides.json \
+  --package sai \
+  --directory . \
+  --ca-key-path ./ca.key.pem
+```
+
+暗号化 PEM の場合は、実行の成功・失敗を確認したら `unset SYMBOL_CA_PASSWORD` で入力値を削除します。失敗した場合は後続へ進まず原因を確認します。
+
+`rest_overrides.json` は配置するだけでは反映されないため、`--rest-overrides` で渡します。
+既存の鍵やデータがある配置先で、新規構築用の `setup` を無条件に再実行しないでください。
+**生成しただけでは起動せず、次の通常用・復旧用 override を保存してから進めます。**
+
+## 通常用の Compose override
+
+構成に応じて、次のどちらか一方を `docker-compose.override.yaml` に保存します。既存のファイルがある場合は必要な設定を統合してください。
+`name: testnet` でプロジェクトを分け、明示的なネットワーク名も Mainnet と分けます。`ports: !override` と `ipam: !override` で元の公開ポートと IPAM 設定を置き換えます。
+
+### Light API 用
+
+```yaml title="docker-compose.override.yaml(Light API)"
+name: testnet
+
+services:
+  client:
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 300s
+    ports: !override
+      - "7950:7950"
+  rest-api:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:63000:3000"
+    networks:
+      default:
+        ipv4_address: 172.21.0.25
+
+networks:
+  default:
+    name: catapult-node-testnet-network
+    ipam: !override
+      config:
+        - subnet: 172.21.0.0/24
+```
+
+### Full API 用
+
+```yaml title="docker-compose.override.yaml(Full API)"
+name: testnet
+
+services:
+  db:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:27018:27017"
+  client:
+    restart: unless-stopped
+    stop_signal: SIGINT
+    stop_grace_period: 300s
+    ports: !override
+      - "7950:7950"
+  broker:
+    restart: unless-stopped
+  rest-api:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:63000:3000"
+    networks:
+      default:
+        ipv4_address: 172.21.0.25
+
+networks:
+  default:
+    name: catapult-node-testnet-network
+    ipam: !override
+      config:
+        - subnet: 172.21.0.0/24
+```
+
+MongoDB はホストのループバックだけに公開します。`27018:27017` とだけ記述すると、ホストの全インターフェースへ公開されるため、この例では使いません。
+Full API の生成元には `initiate` サービスもあります。override に書かれていない生成元のサービスは残るため、削除や追加は不要です。
+
+## リカバリー用の Compose override
+
+`docker-compose-recovery.override.yaml` は自動では読み込まれません。復旧時の `-f` で明示します。
+通常用と同じプロジェクト名・P2P ポート・ネットワーク名・サブネットを使い、復旧時だけ元の設定へ戻ることを防ぎます。
+
+### Light API 用
+
+```yaml title="docker-compose-recovery.override.yaml(Light API)"
+name: testnet
+
+services:
+  client:
+    stop_signal: SIGINT
+    stop_grace_period: 300s
+    ports: !override
+      - "7950:7950"
+
+networks:
+  default:
+    name: catapult-node-testnet-network
+    ipam: !override
+      config:
+        - subnet: 172.21.0.0/24
+```
+
+### Full API 用
+
+```yaml title="docker-compose-recovery.override.yaml(Full API)"
+name: testnet
+
+services:
+  db:
+    ports: !override
+      - "127.0.0.1:27018:27017"
+  client:
+    stop_signal: SIGINT
+    stop_grace_period: 300s
+    ports: !override
+      - "7950:7950"
+
+networks:
+  default:
+    name: catapult-node-testnet-network
+    ipam: !override
+      config:
+        - subnet: 172.21.0.0/24
+```
+
+Light API の復旧構成は `client` だけ、Full API は `db`・`initiate`・`client` です。復旧用の生成元に存在しない `rest-api`・`broker` は追加しません。
+通常用 override を復旧用にそのまま重ねると不要なサービスや再起動方針まで追加されるため、ファイルを分けます。
+
+## 公開設定を追加する
+
+### P2P の着信を許可する
+
+管理者が既存の SSH・Mainnet 用の許可設定を維持し、Testnet の `7950/tcp` を追加します。UFW が有効な場合の例です。
+
+```bash
+sudo ufw allow 7950/tcp
+```
+
+VPS 側のファイアウォールやルーターにも同じ着信許可・転送が必要です。`63000`・`27018` は外部へ公開しません。
+Docker の公開範囲は UFW だけで判断せず、[Docker のポート公開の注意点](../../development-tools/docker.mdx) と Compose のマージ結果も確認してください。
+
+### nginx で Testnet のホスト名を振り分ける
+
+[nginx と HTTPS の設定](./nginx.mdx) に沿って、`YOUR_TESTNET_NODE_DOMAIN` 用の DNS、ACME 確認用の設定、証明書を追加します。Mainnet 用の設定を上書きせず、Testnet 用には別の設定ファイルを作成してください。
+既存と同じ IPv4 の 3000 番・3001 番を nginx で使い、異なるホスト名から別の REST へ転送します。
+
+| 公開ホスト名 | ホスト上の nginx の待受 | 転送先 |
+| --- | --- | --- |
+| `YOUR_MAINNET_NODE_DOMAIN` | HTTP 3000/HTTPS 3001 | `http://127.0.0.1:53000` |
+| `YOUR_TESTNET_NODE_DOMAIN` | HTTP 3000/HTTPS 3001 | `http://127.0.0.1:63000` |
+
+証明書を取得してから、次の Testnet 用設定を保存します。`YOUR_TESTNET_NODE_DOMAIN` は、証明書パスも含めてすべて置き換えます。
+先頭の `map` は `http` コンテキストで読み込まれる `sites-available` の設定ファイルに置きます。変数名が既存設定と重複する場合は統合してください。
+
+```nginx title="/etc/nginx/sites-available/symbol-testnet"
+map $http_upgrade $symbol_testnet_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 3000;
+    server_name YOUR_TESTNET_NODE_DOMAIN;
+
+    access_log /var/log/nginx/YOUR_TESTNET_NODE_DOMAIN.access.log node_access;
+    error_log /var/log/nginx/YOUR_TESTNET_NODE_DOMAIN.error.log warn;
+
+    location / {
+        proxy_pass http://127.0.0.1:63000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $symbol_testnet_connection_upgrade;
+    }
+}
+
+server {
+    listen 3001 ssl;
+    http2 on;
+    server_name YOUR_TESTNET_NODE_DOMAIN;
+
+    access_log /var/log/nginx/YOUR_TESTNET_NODE_DOMAIN.access.log node_access;
+    error_log /var/log/nginx/YOUR_TESTNET_NODE_DOMAIN.error.log warn;
+
+    ssl_certificate /etc/letsencrypt/live/YOUR_TESTNET_NODE_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/YOUR_TESTNET_NODE_DOMAIN/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:63000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $symbol_testnet_connection_upgrade;
+    }
+}
+```
+
+`Upgrade`・`Connection` は Full API の WebSocket 接続も転送するための設定です。Light API に WebSocket 機能を追加するものではありません。[nginx の WebSocket プロキシの説明](https://nginx.org/en/docs/http/websocket.html)
+
+既存の同名リンクがないことを確認して設定を有効にし、`nginx -t` が成功してから再読み込みします。
+
+```bash
+sudo ln -s /etc/nginx/sites-available/symbol-testnet /etc/nginx/sites-enabled/symbol-testnet
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+証明書の自動更新も Testnet のホスト名で確認します。ノード起動前の転送先は接続できないため、API の応答確認は起動後に行います。
+
+## マージ結果を確認して起動する
+
+以降は `symbol` ユーザーの `~/symbol-node-testnet` で操作します。[プロジェクト名の優先順位](https://docs.docker.com/compose/how-tos/project-name/)による取り違えを防ぐため、コマンドにも `-p testnet` を付けます。
+意図しない `COMPOSE_FILE` を設定している場合は解除し、ここで説明するファイルを使ってください。
+
+```bash
+docker compose -p testnet config
+docker compose -p testnet config --services
+
+docker compose -p testnet \
+  -f docker-compose-recovery.yaml \
+  -f docker-compose-recovery.override.yaml \
+  config
+```
+
+次の対応を確認してから起動します。
+
+- 通常用・復旧用のプロジェクト名は両方 `testnet`。
+- `client` の公開ポートは `7950:7950` だけで、`7900:7900` が残っていない。
+- 通常用の REST は `127.0.0.1:63000:3000`、固定 IP は `172.21.0.25`。
+- サブネットは `172.21.0.0/24` の 1 つだけで、`172.20.0.0/24` が残っていない。
+- Full API の MongoDB は通常用・復旧用とも `127.0.0.1:27018:27017`。
+- サービスは通常用の Light API が `client`・`rest-api`、Full API が `db`・`initiate`・`client`・`broker`・`rest-api`。復旧用は前述の構成に一致する。
+
+生成された `userconfig/resources/config-node.properties` の P2P ポートと、`userconfig/rest.json` の `apiNode.port` も `7950` であることを確認します。
+
+```bash
+docker compose -p testnet up -d
+docker compose -p testnet ps
+docker compose -p testnet logs --tail=100
+
+python -m shoestring health \
+  --config ./shoestring/shoestring.ini \
+  --directory .
+```
+
+`health` に加えて、Mainnet と Testnet の両方の公開ホスト名で `/node/info`・`/chain/info` を確認します。
+`/node/info` のネットワーク識別情報がそれぞれのネットワークに対応し、Testnet の公開ホスト名が Mainnet の REST に転送されていないことを照合してください。Mainnet の従来のコンテナと公開 URL が引き続き動作することも確認します。
+API の応答だけで同期完了や委任受け入れの成功は判断しません。[起動と動作確認](./shoestring-start.mdx)の鍵のバックアップ・退避も、Testnet 側の鍵を対象に行います。
+
+## 保守と復旧
+
+通常の停止・再開、状態確認、リカバリーの操作は、Mainnet/Testnet 共通の[ノードの保守](./maintenance.mdx)を参照してください。
+この併設例の Testnet を操作するときは、作業ディレクトリを `~/symbol-node-testnet`、プロジェクト名を `testnet` とし、復旧時にはこのページで用意した `docker-compose-recovery.override.yaml` も明示して読み込みます。
+
+通常用・復旧用 override の公開ポート、ネットワーク名・サブネット、データ参照先が対応することを確認し、併設している別ノードを操作しないようにしてください。
+
+## 参照
+
+- [Shoestring 0.2.4 — Peer 用 Compose テンプレート](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/templates/docker-compose-peer.yaml)
+- [Shoestring 0.2.4 — Peer+Full API 用 Compose テンプレート](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/templates/docker-compose-dual.yaml)
+- [Shoestring — setup の実装と REST overrides の指定](https://github.com/symbol/product/blob/0cda29ca3665e5cf9e074e8f145c6c845c6efada/tools/shoestring/shoestring/commands/setup.py)
+- [Docker Compose — マージと `!override`](https://docs.docker.com/reference/compose-file/merge/)

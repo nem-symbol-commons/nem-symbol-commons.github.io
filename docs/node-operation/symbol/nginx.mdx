@@ -1,0 +1,324 @@
+---
+title: nginx と HTTPS の設定
+description: ホスト上の nginx で Light API を公開し、HTTPS 証明書を自動更新します。
+slug: /node-operation/symbol/nginx
+sidebar_position: 3
+tags:
+- Symbol
+---
+
+**操作ユーザー：管理者ユーザー。作業場所：管理者の SSH セッション。**
+
+[おすすめの構成](./node-types.mdx#recommended-configuration)の対象環境を確認し、[サーバーの準備](./server-preparation.mdx)まで完了してから進めてください。
+
+**この節は、残しておいた管理者ユーザーの SSH セッションで実行します。** `symbol` ユーザーの接続はそのまま残してください。nginx の設定と証明書の準備・自動更新を終えたら、[Shoestring の導入](./shoestring.mdx) から `symbol` ユーザーのセッションで構築を進めます。
+
+:::note[ドメイン名の置換と確認]
+
+設定例と Certbot・ログ確認コマンドの `YOUR_NODE_DOMAIN` は、実際の公開ドメイン名へ置き換えます。`server_name`、Certbot の `--cert-name`・`-d`、証明書パス、ログ名も同じ名前にそろえてください。既存の証明書を使う場合は、`certbot certificates` に表示される実際の証明書パスを使います。
+
+設定を保存したら、掲載する `grep` コマンドで置換漏れを確認します。**この検索文字列の `YOUR_NODE_DOMAIN` は変更せずに実行します。** 一致した行は修正して再確認し、何も表示されず読み取りエラーもなければ次へ進みます。`server_name` やログ名の置換漏れは `nginx -t` では検出できないため、両方の確認が必要です。
+
+:::
+
+## 新規インストールした nginx の基本設定
+
+配布版の `/etc/nginx/nginx.conf` を基本に、後のホスト別設定で使うログ形式を追加します。現在の設定をバックアップしてから編集します。
+
+```bash
+sudo cp -a /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.bak.$(date +%Y%m%d%H%M%S)"
+sudo vi /etc/nginx/nginx.conf
+```
+
+既存の `http { ... }` 内で、`conf.d`・`sites-enabled` の読み込みより前に次を追加します。**以下は追加する部分だけです。** 同名の `node_access` が定義済みなら、重複させず内容を確認してください。
+
+```nginx title="/etc/nginx/nginx.conf の既存 http ブロック内へ追加"
+log_format node_access '$remote_addr - $remote_user [$time_local] '
+                       '"$request" $status $body_bytes_sent '
+                       '"$http_referer" "$http_user_agent" '
+                       'host=$host port=$server_port request_time=$request_time '
+                       'upstream_time=$upstream_response_time';
+```
+
+[`log_format`](https://nginx.org/en/docs/http/ngx_http_log_module.html#log_format) の `node_access` は、ホスト名、入口のポート、リクエスト全体と上流の応答時間を記録する形式です。後の各 `server` でこの形式とホスト別ファイルを指定します。
+
+同じ `http` 内で、次の設定も確認します。同じディレクティブが既にある場合は値を変更し、ない場合だけ追加します。
+
+```nginx title="既存 http ブロック内で確認・変更する項目"
+server_tokens off;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 10m;
+```
+
+[`server_tokens off`](https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens) は応答ヘッダーなどの nginx バージョン表示を抑えます。HTTPS は [TLS 1.2/1.3](https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_protocols) に限定します。
+配布版のモジュール、ワーカー、ログなどの設定と、`conf.d`・`sites-enabled` の `include` は残します。ACME と API の `server` ブロックは、後の手順で `sites-available` に分けて作成します。
+
+新規インストール時の既定サイトを使わない場合は、`/etc/nginx/sites-enabled/default` が配布時の `sites-available/default` を指すリンクであることを確認してから、そのリンクだけを外します。既に利用中のサイトは削除しないでください。
+
+```bash
+ls -l /etc/nginx/sites-enabled/default
+sudo unlink /etc/nginx/sites-enabled/default
+sudo nginx -t
+```
+
+`nginx -t` が成功してから次へ進みます。設定の再読み込みは、次のドメイン確認用 server を追加した後に行います。
+
+## Certbot で HTTPS 証明書を取得する
+
+ここからも**管理者ユーザー**で実行します。[Certbot](https://packages.ubuntu.com/resolute/certbot) は先ほどの apt で導入済みです。HTTPS 用には Let’s Encrypt の証明書を取得します。これは Symbol の P2P 用証明書とは別で、`ca.key.pem` も使いません。
+
+本記事では IPv4 のみを使います。公開 DNS 名 `YOUR_NODE_DOMAIN` の A レコードをこのサーバーのグローバル IPv4 アドレスへ向け、**AAAA レコードは登録しません**。既に AAAA レコードがある場合は削除し、DNS の変更が反映されてから証明書を取得してください。[HTTP-01 によるドメイン確認](https://letsencrypt.org/docs/challenge-types/#http-01-challenge) には外部からの 80 番への接続が必要で、3000 番・3001 番では代用できません。
+
+まず、nginx で確認用ファイルを配信する場所を用意します。
+
+```bash
+sudo install -d -m 755 /var/www/letsencrypt
+sudo vi /etc/nginx/sites-available/symbol-acme
+```
+
+既に同じホスト名・80 番の設定がある場合は、新たな server を重複させず、既存 server へ `/.well-known/acme-challenge/` の location を追加してください。
+
+```nginx title="/etc/nginx/sites-available/symbol-acme"
+server {
+    listen 80;
+    server_name YOUR_NODE_DOMAIN;
+
+    access_log /var/log/nginx/YOUR_NODE_DOMAIN.access.log node_access;
+    error_log /var/log/nginx/YOUR_NODE_DOMAIN.error.log warn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 404;
+    }
+}
+```
+
+保存した設定にドメイン名の置換漏れがないか確認します。
+
+```bash
+sudo grep -Rn 'YOUR_NODE_DOMAIN' /etc/nginx/sites-available/
+```
+
+新規に作成した設定を有効化します。既存の同名ファイルやリンクは上書きせず内容を確認してください。`nginx -t` が成功した場合にだけ、次の起動・再読み込みへ進みます。
+
+```bash
+sudo ln -s /etc/nginx/sites-available/symbol-acme /etc/nginx/sites-enabled/symbol-acme
+sudo nginx -t
+sudo systemctl enable --now nginx
+sudo systemctl reload nginx
+```
+
+[webroot 方式](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot) で証明書を取得します。nginx は稼働したまま、Certbot が確認用ファイルを一時的に配置します。
+
+```bash
+sudo certbot certonly --webroot -w /var/www/letsencrypt \
+  --cert-name YOUR_NODE_DOMAIN -d YOUR_NODE_DOMAIN
+sudo certbot certificates
+```
+
+初回は連絡先メールアドレスの登録と利用規約の確認などを求められます。取得が成功したことを確認し、`certbot certificates` に表示された証明書と秘密鍵のパスを控えます。本記事の例では、`/etc/letsencrypt/live/YOUR_NODE_DOMAIN/fullchain.pem` と `privkey.pem` です。既存証明書がある場合は、その名前・対象ドメインを確認してから利用してください。**秘密鍵の読み取り権限を `symbol` ユーザーへ広げる必要はありません。**
+
+## nginx で 3000 番・3001 番を公開する
+
+nginx 側では、管理者が次の `server` ブロックを `http` 設定へ組み込みます。`sudo vi /etc/nginx/sites-available/symbol` で編集し、保存後に `sites-enabled` から有効化します。[HTTPS 証明書・秘密鍵のパス](https://nginx.org/en/docs/http/configuring_https_servers.html) は、先ほど確認した値を使います。同じホスト・ポートの設定がある場合は重複させず統合し、設定の検査・反映も管理者が行います。
+
+```nginx title="/etc/nginx/sites-available/symbol"
+server {
+    listen 3000;
+    server_name YOUR_NODE_DOMAIN;
+
+    access_log /var/log/nginx/YOUR_NODE_DOMAIN.access.log node_access;
+    error_log /var/log/nginx/YOUR_NODE_DOMAIN.error.log warn;
+    location / {
+        proxy_pass http://127.0.0.1:53000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 3001 ssl;
+    http2 on;
+    server_name YOUR_NODE_DOMAIN;
+
+    access_log /var/log/nginx/YOUR_NODE_DOMAIN.access.log node_access;
+    error_log /var/log/nginx/YOUR_NODE_DOMAIN.error.log warn;
+
+    ssl_certificate /etc/letsencrypt/live/YOUR_NODE_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/YOUR_NODE_DOMAIN/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:53000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+API 用設定も、冒頭と同じ方法で置換漏れを確認します。
+
+```bash
+sudo grep -Rn 'YOUR_NODE_DOMAIN' /etc/nginx/sites-available/
+```
+
+3001 番の HTTPS では HTTP/2 を有効にしています。[起動と動作確認](./shoestring-start.mdx)で、ブラウザの開発者ツールに `h2` と表示されることを確認します。
+
+<details>
+<summary>HTTP/2 と転送ヘッダーの役割</summary>
+
+HTTPS の 3001 番では[`http2 on`](https://nginx.org/en/docs/http/ngx_http_v2_module.html#http2) で HTTP/2 を有効にします。[HTTP/2](https://www.rfc-editor.org/rfc/rfc9113.html#section-2) は 1 本の接続で複数の要求を並行処理でき、ヘッダーも圧縮するため、複数の API を繰り返し呼び出すクライアントでは接続や通信の負担を抑えられます。単発の問い合わせで必ず高速になるという意味ではありません。HTTP/2 に対応しないクライアントは HTTP/1.1 で接続できます。
+
+`http2 on` は nginx 1.25.1 以降の記法です。`nginx -v` で版、`nginx -V` の出力で `--with-http_v2_module` を確認してください。[Ubuntu 26.04 配布版](https://packages.ubuntu.com/resolute/nginx) の nginx 1.28.3 ではこの記法を利用できます。
+
+[`proxy_set_header`](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header) で、転送先へ元の接続元 IP・公開ホスト名・HTTP/HTTPS の情報を渡します。ここで行うのは、ブラウザへ別 URL を返すリダイレクトではなく、nginx から Light API へのリバースプロキシ転送です。
+
+`proxy_http_version 1.1` は、nginx から Light API への通信を HTTP/1.1 にする指定です。クライアントから nginx への HTTP/2 接続とは別に設定します。
+
+nginx 自身のアクセスログは `$remote_addr` で接続元 IP を記録するため、これらのヘッダーがなくても記録できます。Light API 側のログでも元の IP を使えるかは、アプリケーションが転送ヘッダーを参照し、信頼するプロキシを適切に設定しているかによります。`X-Forwarded-For` は既存の値へ接続元 IP を追記するため、先頭の値を無条件に信頼しないでください。
+
+</details>
+
+取得した証明書のパスを設定し、有効化してから、管理者が構文を検査・反映します。`nginx -t` が成功した場合にだけ、次の起動・再読み込みへ進みます。既存の同名ファイルやリンクがある場合は上書きせず内容を確認してください。
+
+```bash
+sudo ln -s /etc/nginx/sites-available/symbol /etc/nginx/sites-enabled/symbol
+sudo nginx -t
+sudo systemctl enable --now nginx
+sudo systemctl reload nginx
+```
+
+Light API の起動前は転送先へ接続できず、nginx の応答が 502 になる場合があります。ノード起動後に公開 URL で確認します。
+
+この構成では、nginx がホストの 3000 番で HTTP、3001 番で HTTPS を受け、どちらも `127.0.0.1:53000` の Light API へ転送します。nginx と Light API が同じホストの 3000 番を取り合わないようにします。HTTPS の入口に 443 番は使いません。
+
+3000 番で平文 HTTP も公開するのは、`apiHttps = false` の Shoestring の `health` が、公開ホスト名の HTTP 3000 番を使って Light API を検査するためです。API の利用には HTTPS の 3001 番を案内します。HTTP での直接応答が不要なら HTTPS へリダイレクトする構成も選べますが、HTTP 利用者と `health` がその応答を扱えるか確認してから変更してください。本記事では、3000 番も REST へ直接転送する設定を維持します。
+
+公開 API には第三者からもアクセスできます。利用状況に応じて、nginx の[`limit_req` によるレート制限](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html) などを検討してください。制限を設ける場合は、通常の API 利用や監視まで拒否しない値に調整します。
+
+この例は、nginx をコンテナではなくホスト上で動かす場合のものです。nginx を別のコンテナや別サーバーで動かす構成では、転送先とアクセス制限をその構成に合わせて設計してください。
+
+## Full API を公開する場合の WebSocket 設定
+
+**この節は Full API を公開する場合だけ追加します。** 本記事の Light API 構成では不要です。nginx の設定だけで Light API に WebSocket 機能を追加することはできません。Full API 本体の構築は、[公式の構築手順](https://docs.symboltest.net/en/userbook/shoestring/quickstart/)を参照してください。
+
+Symbol の [WebSocket 接続先](https://docs.symbol.dev/api.html#websockets) は、REST と同じホスト・ポートの `/ws` です。この例では `wss://YOUR_NODE_DOMAIN:3001/ws` を利用者へ案内します。3000 番では `ws://YOUR_NODE_DOMAIN:3000/ws` でも接続できますが、通信は暗号化されません。
+
+以下は、Full API の REST Gateway を `127.0.0.1:53000` で待ち受けさせ、ホスト上の nginx から転送する場合の設定です。実際の待受が異なる場合は、既存の `location /` と以下の `proxy_pass` をともに変更してください。
+
+`sudo vi /etc/nginx/sites-available/symbol` で編集し、**3000 番・3001 番の両方の `server` 内に、既存の `location /` と並べて**次を追加します。既存の `location /` は残します。同じ `/ws` の設定がある場合は重複させず統合してください。
+
+```nginx title="両方の server ブロック内へ追加（nginx 1.28.3）"
+location = /ws {
+    proxy_pass http://127.0.0.1:53000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Server $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 300s;
+}
+```
+
+[`Upgrade`・`Connection`](https://nginx.org/en/docs/http/websocket.html) は、WebSocket へ切り替える要求を REST Gateway へ渡すために明示します。`proxy_pass` に URI を付けないため、転送先にも `/ws` が渡ります。3001 番の `http2 on` はそのまま残し、WebSocket の切り替えには HTTP/1.1 を使います。
+
+`proxy_read_timeout 300s` は、上流からの読み取りが途絶えたときの待機時間です。nginx の既定値は 60 秒で、この例では 300 秒に延ばしています。接続全体の寿命を 300 秒に制限する設定ではなく、上流からのデータや WebSocket の ping フレームを受信すると待機時間が更新されます。長時間通知のない接続を維持する場合は、REST Gateway 側の ping 送信間隔も確認して調整してください。
+
+管理者ユーザーで構文を検査し、成功した場合にだけ再読み込みします。
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 接続とブロック通知を確認する
+
+Full API の起動・同期後、手元のブラウザで `https://YOUR_NODE_DOMAIN:3001/node/info` を開き、開発者ツールのコンソールで次を実行します。`YOUR_NODE_DOMAIN` は実際の公開ドメイン名へ置き換えてください。
+
+```javascript title="ブラウザの開発者ツールで実行"
+const symbolSocket = new WebSocket('wss://YOUR_NODE_DOMAIN:3001/ws');
+symbolSocket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log(message);
+  if (message.uid) {
+    symbolSocket.send(JSON.stringify({ uid: message.uid, subscribe: 'block' }));
+  }
+};
+symbolSocket.onerror = (event) => console.error('WebSocket 接続エラー', event);
+symbolSocket.onclose = (event) => console.log('WebSocket 切断', event.code);
+```
+
+最初に `uid` を含むメッセージを受信し、その後、新しいブロックが発生すると `topic: "block"` の通知が届くことを確認します。これは公式の[ブロック通知の購読手順](https://docs.symbol.dev/guides/blockchain/listening-new-blocks.html#method-01-using-websockets)と同じ流れです。開発者ツールのネットワーク欄では、WebSocket 接続の応答が `101 Switching Protocols` になっていることも確認します。確認を終えたら、コンソールで `symbolSocket.close()` を実行します。
+
+`uid` を受信できても通知が届かない場合は、ノードの同期と Broker・REST Gateway の通知経路も確認してください。接続自体に失敗する場合は、証明書、nginx のエラーログ、転送先の待受、両方の `server` への追加設定を確認します。上記の接続確認例は実ノードでは未実行です。
+
+## ホスト別ログとローテーションを確認する
+
+上の 3 つの server は同じホスト名なので、アクセスログとエラーログをそれぞれ次のファイルへまとめます。別のホストを追加する場合は、その server で別のファイル名を指定します。
+
+```bash
+sudo tail -n 50 /var/log/nginx/YOUR_NODE_DOMAIN.access.log
+sudo tail -n 50 /var/log/nginx/YOUR_NODE_DOMAIN.error.log
+sudo cat /etc/logrotate.d/nginx
+sudo logrotate --debug /etc/logrotate.d/nginx
+```
+
+アクセスログの `port=80` はドメイン確認用、`port=3000` は HTTP API、`port=3001` は HTTPS API への接続です。`request_time` と `upstream_time` で、nginx 全体と Light API 側の処理時間を比較できます。上流へ転送しないリクエストでは `upstream_time` は `-` になります。ノード起動前の 502 や転送先への接続エラーは、このホストのエラーログで確認できます。
+
+Ubuntu の `/etc/logrotate.d/nginx` で、`/var/log/nginx/*.log` が対象になっていることを確認します。この例のホスト別ログも同じディレクトリに置くため、その対象に含まれます。`logrotate --debug` はローテーションを実行せず、設定と対象ファイルを確認するコマンドです。実際の保存日数・圧縮・ログ再オープン処理も確認し、既存の定義と重複する設定を追加しないでください。
+
+## 証明書の自動更新を設定する
+
+証明書の更新後、nginx が新しい証明書を読み込むように[deploy hook](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates) を登録します。このフックは更新に成功したときに呼び出され、`nginx -t -q` に成功してから reload します。構文検査に失敗した場合は `set -e` により reload せず終了します。同名のファイルがある場合は内容を確認して統合してください。
+
+```bash
+sudo install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx > /dev/null <<'HOOK'
+#!/bin/sh
+set -eu
+/usr/sbin/nginx -t -q
+/usr/bin/systemctl reload nginx
+HOOK
+sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+
+sudo systemctl enable --now certbot.timer
+sudo systemctl list-timers --all certbot.timer
+```
+
+[`-q`](https://nginx.org/en/docs/switches.html) は構文検査の正常メッセージを抑える指定です。通常の `nginx -t` は成功時のメッセージも標準エラー出力へ書くため、Certbot が `ran with error output` と表示することがあります。`syntax is ok`・`test is successful` だけなら構文検査は成功しています。`-q` を付けても実際のエラーは表示されます。
+
+タイマーの次回実行予定を確認した後、**更新テストと nginx の reload を一緒に確認**します。
+
+```bash
+sudo test -x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+sudo certbot renew --cert-name YOUR_NODE_DOMAIN --dry-run --run-deploy-hooks
+sudo journalctl -u nginx.service --since "10 minutes ago" --no-pager
+```
+
+`test -x` が成功すること、Certbot の出力にテスト更新の成功が表示され、フックの実行エラーがないことを確認します。続けて nginx の journal で、**テスト実行時刻に reload の成功記録があること**を確認してください。証明書の更新成功と nginx の reload 成功は別なので、Certbot の終了コードだけでは判断しません。フックのエラーが出た場合は、その出力と nginx の journal・エラーログを確認してから再テストします。
+
+`--dry-run` はテスト用の認証局で更新を試し、本番の証明書を置き換えません。通常の dry-run では deploy hook を実行しないため、`--run-deploy-hooks` を付けています。このとき nginx が読み込むのは、テスト用証明書ではなく現在の本番証明書です。実際の自動更新では、新しい証明書への更新成功後に同じフックが実行されます。
+
+**80 番の着信許可と `symbol-acme` の設定は、取得後も自動更新のために残します。** 80 番を開けられない環境では、DNS プロバイダーに対応する[DNS プラグイン](https://eff-certbot.readthedocs.io/en/stable/using.html#dns-plugins) による認証を検討してください。
+
+## 次の手順
+
+[Shoestring の導入](./shoestring.mdx) へ進みます。
