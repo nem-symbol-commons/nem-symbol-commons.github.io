@@ -1,6 +1,7 @@
 import { themes as prismThemes } from "prism-react-renderer";
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
+import { createOgp } from "./plugins/ogp";
 
 const repositoryUrl =
   "https://github.com/nem-symbol-commons/nem-symbol-commons.github.io";
@@ -106,4 +107,15 @@ const config: Config = {
   } satisfies Preset.ThemeConfig,
 };
 
-export default config;
+export default async function createConfig(): Promise<Config> {
+  const ogp = await createOgp(__dirname);
+  return {
+    ...config,
+    markdown: { ...config.markdown, parseFrontMatter: ogp.parseFrontMatter },
+    themeConfig: {
+      ...config.themeConfig,
+      image: ogp.defaultImage,
+      metadata: [{ name: "twitter:card", content: "summary_large_image" }],
+    },
+  };
+}
