@@ -1,0 +1,913 @@
+---
+title: 検証
+description: 署名、ブロックヘッダー、包含証明、アカウントとメタデータの状態証明を検証します。
+slug: /symbol/sdk/verify
+sidebar_position: 12
+tags:
+- SymbolSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+署名、ブロックへの包含、状態証明はそれぞれ異なる事実を検証します。
+ノードが返したハッシュ同士を比べるだけでは、ノードへの信頼を取り除けません。
+信頼の起点として、別途信頼できる経路で得たブロックの高さとハッシュが必要です。
+ファイナリティ投票・VRF・チェーン選択は、以下の検証には含まれません。
+
+## 12.1 ペイロードの署名とハッシュ
+
+[転送](transactions.mdx)または[オフライン署名](offline-signature.mdx)で作った `payload.json` を読み込みます。
+ネットワークが異なると署名対象の generation hash seed も異なるため、対象は同じ Testnet に統一します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-transaction.ts"
+import { readFileSync } from 'node:fs';
+import { PublicKey, Signature, utils } from 'symbol-sdk';
+import {
+  models,
+  SymbolFacade,
+  SymbolTransactionFactory,
+  Verifier,
+} from 'symbol-sdk/symbol';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+// 受け取ったペイロードを復元し、署名前に内容を確認する。
+const tx = SymbolTransactionFactory.deserialize(
+  utils.hexToUint8(JSON.parse(readFileSync('payload.json', 'utf8')).payload),
+);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (
+  tx.network.value !== facade.network.identifier ||
+  !facade.verifyTransaction(tx, tx.signature)
+) {
+  throw new Error('ネットワークまたは署名が不正です');
+}
+
+const hash = facade.hashTransaction(tx);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (
+  [
+    models.TransactionType.AGGREGATE_COMPLETE.value,
+    models.TransactionType.AGGREGATE_BONDED.value,
+  ].includes(tx.type.value)
+) {
+  const aggregate = tx as models.AggregateCompleteTransactionV3;
+  if (
+    aggregate.transactionsHash.toString() !==
+    SymbolFacade.hashEmbeddedTransactions(aggregate.transactions).toString()
+  ) {
+    throw new Error('内部トランザクションが改ざんされています');
+  }
+  for (const cosig of aggregate.cosignatures) {
+    if (
+      !new Verifier(new PublicKey(cosig.signerPublicKey.bytes)).verify(
+        hash.bytes,
+        new Signature(cosig.signature.bytes),
+      )
+    ) {
+      throw new Error('連署が不正です');
+    }
+  }
+}
+
+console.log('verified hash:', hash.toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_transaction.py"
+import json
+from pathlib import Path
+from symbolchain import sc
+from symbolchain.CryptoTypes import PublicKey, Signature
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.KeyPair import Verifier
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+# 受け取ったペイロードを復元し、署名前に内容を確認する。
+tx = TransactionFactory.deserialize(
+    bytes.fromhex(json.loads(Path('payload.json').read_text())['payload'])
+)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if tx.network.value != facade.network.identifier or not facade.verify_transaction(
+    tx, tx.signature
+):
+    raise ValueError('ネットワークまたは署名が不正です')
+
+tx_hash = facade.hash_transaction(tx)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if tx.type_ in (
+    sc.TransactionType.AGGREGATE_COMPLETE,
+    sc.TransactionType.AGGREGATE_BONDED,
+):
+    if str(tx.transactions_hash) != str(
+        SymbolFacade.hash_embedded_transactions(tx.transactions)
+    ):
+        raise ValueError('内部トランザクションが改ざんされています')
+    for cosig in tx.cosignatures:
+        if not Verifier(PublicKey(cosig.signer_public_key.bytes)).verify(
+            tx_hash.bytes, Signature(cosig.signature.bytes)
+        ):
+            raise ValueError('連署が不正です')
+
+print('verified hash:', tx_hash)
+```
+
+</TabItem>
+</Tabs>
+
+検証成功は残高、期限、制限、マルチシグの閾値を満たすことや、取り込みを保証しません。
+特にアグリゲートの外側署名だけでは内部データの改ざんを検出しきれないため、内部ハッシュも再計算します。
+
+## 12.2 ブロックヘッダーを検証する
+
+ブロックハッシュは、署名・公開鍵・ヘッダー本体を連結した SHA3-256 です。
+Normal は末尾の予約領域を除き、Importance／Nemesis は追加のフッターを含めます。署名検証にはヘッダー本体を使います。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/block-hash.ts"
+import { createHash } from 'node:crypto';
+import { PublicKey, Signature, utils } from 'symbol-sdk';
+import { Verifier } from 'symbol-sdk/symbol';
+
+export type BlockHeader = Record<string, string | number>;
+
+// ブロック型ごとのヘッダーを組み立て、署名とブロックハッシュを検証する。
+export function hashBlock(b: BlockHeader) {
+  if (b.version !== 1 || ![32835, 33091, 33347].includes(Number(b.type))) {
+    throw new Error('未対応のブロック型またはバージョンです');
+  }
+  const parts: Uint8Array[] = [];
+  const integer = (name: string, size: number) => {
+    const value = BigInt(b[name]);
+    if (value < 0n || value >= 1n << BigInt(size * 8))
+      throw new Error(`範囲外: ${name}`);
+    parts.push(utils.intToBytes(size <= 4 ? Number(value) : value, size));
+  };
+  const hex = (name: string, size: number) => {
+    const value = utils.hexToUint8(String(b[name]));
+    if (value.length !== size) throw new Error(`長さ不正: ${name}`);
+    parts.push(value);
+  };
+  integer('version', 1);
+  integer('network', 1);
+  integer('type', 2);
+  integer('height', 8);
+  integer('timestamp', 8);
+  integer('difficulty', 8);
+  hex('proofGamma', 32);
+  hex('proofVerificationHash', 16);
+  hex('proofScalar', 32);
+  for (const name of [
+    'previousBlockHash',
+    'transactionsHash',
+    'receiptsHash',
+    'stateHash',
+  ])
+    hex(name, 32);
+  hex('beneficiaryAddress', 24);
+  integer('feeMultiplier', 4);
+  if (b.type !== 33091) {
+    integer('votingEligibleAccountsCount', 4);
+    integer('harvestingEligibleAccountsCount', 8);
+    integer('totalVotingBalance', 8);
+    hex('previousImportanceBlockHash', 32);
+  }
+  const data = new Uint8Array(parts.flatMap((part) => [...part]));
+  const publicKey = new PublicKey(String(b.signerPublicKey));
+  const signature = new Signature(String(b.signature));
+  if (!new Verifier(publicKey).verify(data, signature))
+    throw new Error('ブロック署名が不正です');
+  return createHash('sha3-256')
+    .update(signature.bytes)
+    .update(publicKey.bytes)
+    .update(data)
+    .digest('hex')
+    .toUpperCase();
+}
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/block_hash.py"
+import hashlib
+from symbolchain.CryptoTypes import PublicKey, Signature
+from symbolchain.symbol.KeyPair import Verifier
+
+
+# 型ごとのヘッダーを組み立て、署名とブロックハッシュを検証する。
+def hash_block(block):
+    if block['version'] != 1 or block['type'] not in (32835, 33091, 33347):
+        raise ValueError('未対応のブロック型またはバージョンです')
+    parts = []
+
+    def integer(name, size):
+        parts.append(int(block[name]).to_bytes(size, 'little'))
+
+    def hex_value(name, size):
+        value = bytes.fromhex(block[name])
+        if len(value) != size:
+            raise ValueError(f'長さ不正: {name}')
+        parts.append(value)
+
+    integer('version', 1)
+    integer('network', 1)
+    integer('type', 2)
+    integer('height', 8)
+    integer('timestamp', 8)
+    integer('difficulty', 8)
+    hex_value('proofGamma', 32)
+    hex_value('proofVerificationHash', 16)
+    hex_value('proofScalar', 32)
+    for name in ('previousBlockHash', 'transactionsHash', 'receiptsHash', 'stateHash'):
+        hex_value(name, 32)
+    hex_value('beneficiaryAddress', 24)
+    integer('feeMultiplier', 4)
+    if block['type'] != 33091:
+        integer('votingEligibleAccountsCount', 4)
+        integer('harvestingEligibleAccountsCount', 8)
+        integer('totalVotingBalance', 8)
+        hex_value('previousImportanceBlockHash', 32)
+    data = b''.join(parts)
+    public_key = PublicKey(block['signerPublicKey'])
+    signature = Signature(block['signature'])
+    if not Verifier(public_key).verify(data, signature):
+        raise ValueError('ブロック署名が不正です')
+    return (
+        hashlib.sha3_256(signature.bytes + public_key.bytes + data).hexdigest().upper()
+    )
+```
+
+</TabItem>
+</Tabs>
+
+`TRUSTED_HEIGHT`・`TRUSTED_HASH` に信頼できるブロックの高さとハッシュを、`TARGET_HEIGHT` に調べたい過去または同じ高さを設定します。
+**同じ問い合わせ先が返した未検証の `meta.hash` を、そのまま信頼の起点にしないでください。**
+信頼済みの新しいブロックから `previousBlockHash` を逆向きにたどり、対象までの各ヘッダーを確認します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-block-header.ts"
+import { writeFileSync } from 'node:fs';
+import { BlockHeader, hashBlock } from './block-hash.js';
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+const { TRUSTED_HEIGHT, TRUSTED_HASH, TARGET_HEIGHT } = process.env;
+
+if (!TRUSTED_HEIGHT || !TRUSTED_HASH || !TARGET_HEIGHT)
+  throw new Error('高さと信頼済みハッシュが必要です');
+
+const target = BigInt(TARGET_HEIGHT);
+
+let height = BigInt(TRUSTED_HEIGHT);
+
+if (target < 1n || target > height) throw new Error('対象の高さが範囲外です');
+
+let expected = TRUSTED_HASH.toUpperCase();
+
+while (height >= target) {
+  const info = await request(`/blocks/${height}`);
+  const block = info.block as BlockHeader;
+  if (
+    BigInt(block.height) !== height ||
+    block.network !== 152 ||
+    hashBlock(block) !== expected
+  ) {
+    throw new Error(`ブロック ${height} の検証に失敗しました`);
+  }
+  if (height === target) writeFileSync('verified-block.json', JSON.stringify(info));
+  expected = String(block.previousBlockHash).toUpperCase();
+  height -= 1n;
+}
+
+console.log('verified height:', target.toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_block_header.py"
+import json
+import os
+import requests
+from pathlib import Path
+from verify.block_hash import hash_block
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+height = int(os.environ['TRUSTED_HEIGHT'])
+
+target = int(os.environ['TARGET_HEIGHT'])
+
+if not 1 <= target <= height:
+    raise ValueError('対象の高さが範囲外です')
+
+expected = os.environ['TRUSTED_HASH'].upper()
+
+while height >= target:
+    info = request(f'/blocks/{height}')
+    block = info['block']
+    if (
+        int(block['height']) != height
+        or block['network'] != 152
+        or hash_block(block) != expected
+    ):
+        raise ValueError(f'ブロック {height} の検証に失敗しました')
+    if height == target:
+        Path('verified-block.json').write_text(json.dumps(info), encoding='utf8')
+    expected = block['previousBlockHash'].upper()
+    height -= 1
+
+print('verified height:', target)
+```
+
+</TabItem>
+</Tabs>
+
+`verified-block.json` はこの検証を通過したローカルファイルとして扱います。
+後から書き換えたファイルや、REST 応答を直接保存しただけのファイルを代用しません。
+
+## 12.3 トランザクションの包含を検証する
+
+`TARGET_HEIGHT` を対象トランザクションの取り込み高にして前節を実行しておきます。
+通常の転送ではトランザクションハッシュが葉です。アグリゲートに連署がある場合は、
+トランザクションハッシュと連署者の公開鍵を格納順に連結した SHA3-256 が Merkle component hash になります。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-inclusion.ts"
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { Hash256, utils } from 'symbol-sdk';
+import {
+  models,
+  proveMerkle,
+  SymbolFacade,
+  SymbolTransactionFactory,
+} from 'symbol-sdk/symbol';
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+// 受け取ったペイロードを復元し、署名前に内容を確認する。
+const tx = SymbolTransactionFactory.deserialize(
+  utils.hexToUint8(JSON.parse(readFileSync('payload.json', 'utf8')).payload),
+);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(tx, tx.signature)) throw new Error('署名が不正です');
+
+let leaf = facade.hashTransaction(tx);
+
+if ([16705, 16961].includes(tx.type.value)) {
+  const aggregate = tx as models.AggregateCompleteTransactionV3;
+  if (
+    aggregate.transactionsHash.toString() !==
+    SymbolFacade.hashEmbeddedTransactions(aggregate.transactions).toString()
+  )
+    throw new Error('内部ハッシュ不一致');
+  if (aggregate.cosignatures.length) {
+    const hasher = createHash('sha3-256').update(leaf.bytes);
+    for (const cosig of aggregate.cosignatures)
+      hasher.update(cosig.signerPublicKey.bytes);
+    leaf = new Hash256(hasher.digest());
+  }
+}
+
+const block = JSON.parse(readFileSync('verified-block.json', 'utf8')).block;
+
+const proof = await request(`/blocks/${block.height}/transactions/${leaf}/merkle`);
+
+// RESTの左右の位置情報を、SDKの検証用パスへ変換する。
+const path = proof.merklePath.map((part: { hash: string; position: string }) => {
+  if (!['left', 'right'].includes(part.position))
+    throw new Error('不正な Merkle 位置です');
+  return { hash: new Hash256(part.hash), isLeft: part.position === 'left' };
+});
+
+if (!proveMerkle(leaf, path, new Hash256(block.transactionsHash)))
+  throw new Error('包含証明が不正です');
+
+console.log('included in verified block:', block.height);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_inclusion.py"
+import hashlib
+import json
+import os
+import requests
+from pathlib import Path
+from symbolchain import sc
+from symbolchain.CryptoTypes import Hash256
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.Merkle import MerklePart, prove_merkle
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+# 受け取ったペイロードを復元し、署名前に内容を確認する。
+tx = TransactionFactory.deserialize(
+    bytes.fromhex(json.loads(Path('payload.json').read_text())['payload'])
+)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(tx, tx.signature):
+    raise ValueError('署名が不正です')
+
+leaf = facade.hash_transaction(tx)
+
+if tx.type_ in (
+    sc.TransactionType.AGGREGATE_COMPLETE,
+    sc.TransactionType.AGGREGATE_BONDED,
+):
+    if str(tx.transactions_hash) != str(
+        SymbolFacade.hash_embedded_transactions(tx.transactions)
+    ):
+        raise ValueError('内部ハッシュ不一致')
+    if tx.cosignatures:
+        leaf = Hash256(
+            hashlib.sha3_256(
+                leaf.bytes
+                + b''.join((c.signer_public_key.bytes for c in tx.cosignatures))
+            ).digest()
+        )
+
+block = json.loads(Path('verified-block.json').read_text())['block']
+
+proof = request(f"/blocks/{block['height']}/transactions/{leaf}/merkle")
+
+path = []
+
+for part in proof['merklePath']:
+    if part['position'] not in ('left', 'right'):
+        raise ValueError('不正な Merkle 位置です')
+    path.append(MerklePart(Hash256(part['hash']), part['position'] == 'left'))
+
+if not prove_merkle(leaf, path, Hash256(block['transactionsHash'])):
+    raise ValueError('包含証明が不正です')
+
+print('included in verified block:', block['height'])
+```
+
+</TabItem>
+</Tabs>
+
+連署の正しさは前の署名検証例でも確認します。包含だけで、任意の未確認ヘッダーが正規チェーン上にあるとは判断しません。
+
+## 12.4 状態証明を検証する
+
+アカウント状態やメタデータは Patricia Merkle proof で `stateHash` に結び付けます。
+REST の `/accounts/{address}/merkle` や `/metadata/{compositeHash}/merkle` が返す `raw` を SDK で復元します。
+SDK の成功値は **数値の1**（Python では `VALID_POSITIVE`）です。エラーコードも0以外なので、真偽値として判定しません。
+
+共通関数には、キーと**自分でシリアライズした状態**を渡します。証明側が返した葉の値をそのまま正解として渡すと、取得内容の検証になりません。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/state-proof.ts"
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { Hash256, utils } from 'symbol-sdk';
+import { deserializePatriciaTreeNodes, provePatriciaMerkle } from 'symbol-sdk/symbol';
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string) {
+  const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+export function sha3(bytes: Uint8Array) {
+  return new Hash256(createHash('sha3-256').update(bytes).digest());
+}
+
+export function join(parts: Uint8Array[]) {
+  return new Uint8Array(parts.flatMap((part) => [...part]));
+}
+
+// キーと状態を、検証済みヘッダーの stateHash に結び付ける。
+export async function verifyState(path: string, key: Uint8Array, state: Uint8Array) {
+  const info = JSON.parse(readFileSync('verified-block.json', 'utf8'));
+  const proof = await request(path);
+  const nodes = deserializePatriciaTreeNodes(utils.hexToUint8(proof.raw));
+  if (!nodes.length) throw new Error('空の状態証明です');
+  const roots = info.meta.stateHashSubCacheMerkleRoots.map(
+    (root: string) => new Hash256(root),
+  );
+  const result = provePatriciaMerkle(
+    sha3(key),
+    sha3(state),
+    nodes,
+    new Hash256(info.block.stateHash),
+    roots,
+  );
+  if (result !== 1) throw new Error(`状態証明の検証失敗: ${result}`);
+  console.log('state verified at height:', info.block.height);
+}
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/state_proof.py"
+import hashlib
+import json
+import os
+import requests
+from pathlib import Path
+from symbolchain.CryptoTypes import Hash256
+from symbolchain.symbol.Merkle import (
+    deserialize_patricia_tree_nodes,
+    prove_patricia_merkle,
+    PatriciaMerkleProofResult,
+)
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def sha3(value):
+    return Hash256(hashlib.sha3_256(value).digest())
+
+
+# キーと状態を、検証済みヘッダーの stateHash に結び付ける。
+def verify_state(path, key, state):
+    info = json.loads(Path('verified-block.json').read_text())
+    proof = request(path)
+    nodes = deserialize_patricia_tree_nodes(bytes.fromhex(proof['raw']))
+    if not nodes:
+        raise ValueError('空の状態証明です')
+    roots = [Hash256(value) for value in info['meta']['stateHashSubCacheMerkleRoots']]
+    result = prove_patricia_merkle(
+        sha3(key), sha3(state), nodes, Hash256(info['block']['stateHash']), roots
+    )
+    if result != PatriciaMerkleProofResult.VALID_POSITIVE:
+        raise ValueError(f'状態証明の検証失敗: {result}')
+    print('state verified at height:', info['block']['height'])
+```
+
+</TabItem>
+</Tabs>
+
+REST の状態と証明は最新状態を返すため、過去の任意の高さの証明として扱えません。
+検証済みヘッダー、サブキャッシュルート、状態、証明のスナップショットが一致している必要があります。
+取得中に状態が更新されると検証に失敗する場合があります。同じ最新状態を取得し直し、その高さのヘッダーを信頼の起点から検証し直します。
+
+### 学習用アカウントの状態
+
+次の例は、重要度0・補助公開鍵なし・保有モザイクが1種類以下の通常アカウントに限定します。
+ハーベスティング用の重要度履歴・投票鍵などを持つアカウントは、公式スキーマに従った追加のシリアライズが必要なので停止します。
+学習用の新しいアカウントに Testnet XYM だけを入金した状態で試してください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-account-state.ts"
+import { utils } from 'symbol-sdk';
+import { join, verifyState } from './state-proof.js';
+import { alice } from '../accounts/key-store.js';
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+const { account: a } = await request(`/accounts/${alice.address}`);
+
+if (
+  a.version !== 1 ||
+  BigInt(a.importance) !== 0n ||
+  a.activityBuckets.length ||
+  Object.keys(a.supplementalPublicKeys).length ||
+  a.mosaics.length > 1
+) {
+  throw new Error('この例の対象外のアカウント状態です');
+}
+
+const u64 = (value: string) => utils.intToBytes(BigInt(value), 8);
+
+const address = utils.hexToUint8(a.address);
+
+if (utils.uint8ToHex(address) !== utils.uint8ToHex(alice.address.bytes))
+  throw new Error('対象アドレス不一致');
+
+// RESTの各フィールドを、公式スキーマの順序とバイト幅で連結する。
+const state = join([
+  utils.intToBytes(a.version, 2),
+  address,
+  u64(a.addressHeight),
+  utils.hexToUint8(a.publicKey),
+  u64(a.publicKeyHeight),
+  new Uint8Array([a.accountType, 0, 0, 0]),
+  utils.intToBytes(a.mosaics.length, 2),
+  ...a.mosaics.flatMap((m: { id: string; amount: string }) => [
+    u64(`0x${m.id}`),
+    u64(m.amount),
+  ]),
+]);
+
+await verifyState(`/accounts/${alice.address}/merkle`, address, state);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_account_state.py"
+import os
+import requests
+from verify.state_proof import verify_state
+from accounts.key_store import alice
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+a = request(f'/accounts/{alice.address}')['account']
+
+if (
+    a['version'] != 1
+    or int(a['importance']) != 0
+    or a['activityBuckets']
+    or a['supplementalPublicKeys']
+    or (len(a['mosaics']) > 1)
+):
+    raise ValueError('この例の対象外のアカウント状態です')
+
+
+def u64(value):
+    return int(value).to_bytes(8, 'little')
+
+
+address = bytes.fromhex(a['address'])
+
+if address != alice.address.bytes:
+    raise ValueError('対象アドレス不一致')
+
+# RESTの各フィールドを、公式スキーマの順序とバイト幅で連結する。
+state = (
+    a['version'].to_bytes(2, 'little')
+    + address
+    + u64(a['addressHeight'])
+    + bytes.fromhex(a['publicKey'])
+    + u64(a['publicKeyHeight'])
+    + bytes([a['accountType'], 0, 0, 0])
+    + len(a['mosaics']).to_bytes(2, 'little')
+    + b''.join((u64(int(m['id'], 16)) + u64(m['amount']) for m in a['mosaics']))
+)
+
+verify_state(f'/accounts/{alice.address}/merkle', address, state)
+```
+
+</TabItem>
+</Tabs>
+
+### メタデータの状態
+
+`METADATA_HASH` に `GET /metadata` で得た `metadataEntry.compositeHash` を設定します。
+アカウント・モザイク・ネームスペースのいずれも同じレイアウトで検証します。
+`targetId` はアカウントメタデータでは0です。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-metadata-state.ts"
+import { utils } from 'symbol-sdk';
+import { join, sha3, verifyState } from './state-proof.js';
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+const id = process.env.METADATA_HASH;
+
+if (!id) throw new Error('METADATA_HASH が必要です');
+
+const { metadataEntry: m } = await request(`/metadata/${id}`);
+
+if (m.version !== 1 || ![0, 1, 2].includes(m.metadataType))
+  throw new Error('未対応のメタデータです');
+
+const keyBytes = join([
+  utils.hexToUint8(m.sourceAddress),
+  utils.hexToUint8(m.targetAddress),
+  utils.intToBytes(BigInt(`0x${m.scopedMetadataKey}`), 8),
+  utils.intToBytes(BigInt(`0x${m.targetId ?? '0'}`), 8),
+  new Uint8Array([m.metadataType]),
+]);
+
+// 登録元・対象・キー・種類からメタデータの複合キーを計算する。
+const compositeHash = sha3(keyBytes);
+
+if (compositeHash.toString() !== id.toUpperCase()) throw new Error('複合キー不一致');
+
+const value = utils.hexToUint8(m.value);
+
+// RESTの各フィールドを、公式スキーマの順序とバイト幅で連結する。
+const state = join([
+  utils.intToBytes(m.version, 2),
+  keyBytes,
+  utils.intToBytes(value.length, 2),
+  value,
+]);
+
+await verifyState(`/metadata/${compositeHash}/merkle`, compositeHash.bytes, state);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_metadata_state.py"
+import os
+import requests
+from verify.state_proof import sha3, verify_state
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+entry_id = os.environ['METADATA_HASH']
+
+m = request(f'/metadata/{entry_id}')['metadataEntry']
+
+if m['version'] != 1 or m['metadataType'] not in (0, 1, 2):
+    raise ValueError('未対応のメタデータです')
+
+key_bytes = (
+    bytes.fromhex(m['sourceAddress'])
+    + bytes.fromhex(m['targetAddress'])
+    + int(m['scopedMetadataKey'], 16).to_bytes(8, 'little')
+    + int(m.get('targetId', '0'), 16).to_bytes(8, 'little')
+    + bytes([m['metadataType']])
+)
+
+# 登録元・対象・キー・種類からメタデータの複合キーを計算する。
+composite_hash = sha3(key_bytes)
+
+if str(composite_hash) != entry_id.upper():
+    raise ValueError('複合キー不一致')
+
+value = bytes.fromhex(m['value'])
+
+# RESTの各フィールドを、公式スキーマの順序とバイト幅で連結する。
+state = (
+    m['version'].to_bytes(2, 'little')
+    + key_bytes
+    + len(value).to_bytes(2, 'little')
+    + value
+)
+
+verify_state(f'/metadata/{composite_hash}/merkle', composite_hash.bytes, state)
+```
+
+</TabItem>
+</Tabs>
+
+キー、値、証明、ヘッダーのいずれかを変えた場合は失敗することを確認します。
+存在しないキーの証明（negative proof）は別の結果です。取得した値の存在を確認するには `VALID_POSITIVE` が必要です。
+
+## 参照資料
+
+- [速習Symbolブロックチェーン：検証](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/13_verify.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)
+- [ブロックハッシュ計算](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/client/catapult/src/catapult/model/EntityHasher.cpp)
+- [アカウント状態スキーマ](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/catbuffer/schemas/symbol/state/account_state.cats)
+- [メタデータ状態スキーマ](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/catbuffer/schemas/symbol/state/metadata_entry.cats)

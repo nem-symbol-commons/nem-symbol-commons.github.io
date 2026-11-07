@@ -122,7 +122,7 @@ Symbol の高さ・金額は文字列から `BigInt` に変換し、モザイク
 
 トランザクションは手元で署名し、Symbol には `{ "payload": "..." }`、NEM には `{ "data": "...", "signature": "..." }` を送ります。
 秘密鍵を受け取る NIS の `/transaction/prepare-announce` を公開ノード向けの例として使わないでください。
-具体的なコードは [Symbol](../symbol/quickstart.md) と [NEM](../nem/quickstart.md) のクイックスタートを参照してください。
+送信のコードは [Symbol のトランザクション](../symbol/sdk/transactions.mdx)と [NEM開発クイックスタート](../nem/quickstart.md)を参照してください。
 
 Symbol の受付応答や NEM の `SUCCESS` は、ブロック取り込み完了の通知ではありません。
 ハッシュで追跡し、Symbol は confirmed のデータと `meta.height`、NEM は取得できたデータの `meta.height` を確認します。

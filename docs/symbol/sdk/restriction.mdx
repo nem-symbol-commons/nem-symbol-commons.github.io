@@ -1,0 +1,323 @@
+---
+title: 制限
+description: アカウントの受信・送信制限とグローバルモザイク制限の登録・解除。
+slug: /symbol/sdk/restriction
+sidebar_position: 10
+tags:
+- SymbolSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+アカウント制限は自分のアカウントの受信・送信を制御します。
+グローバルモザイク制限は、発行者がモザイクの移転条件を設定します。
+制限で自分の操作を妨げないよう、この章も Testnet の専用アカウントで試してください。
+
+## 10.1 アカウントの受信・送信を制限する
+
+以下はそれぞれ**独立した例**です。一度にすべて送らず、1件ずつ適用・確認・解除してください。
+拒否リスト（`block`）を使い、Bob からの受信、Bob への送信、指定モザイクの受信、転送型の送信を制限します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/restriction/account-restrictions.ts"
+import { writeFileSync } from 'node:fs';
+import {
+  generateMosaicAliasId,
+  models,
+  SymbolTransactionFactory,
+  SymbolFacade,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice, bob } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const examples = {
+  'block-incoming': new descriptors.AccountAddressRestrictionTransactionV1Descriptor(
+    new models.AccountRestrictionFlags(
+      models.AccountRestrictionFlags.ADDRESS.value |
+        models.AccountRestrictionFlags.BLOCK.value,
+    ),
+    [bob.address],
+  ),
+  'block-outgoing': new descriptors.AccountAddressRestrictionTransactionV1Descriptor(
+    new models.AccountRestrictionFlags(
+      models.AccountRestrictionFlags.ADDRESS.value |
+        models.AccountRestrictionFlags.OUTGOING.value |
+        models.AccountRestrictionFlags.BLOCK.value,
+    ),
+    [bob.address],
+  ),
+  'block-mosaic': new descriptors.AccountMosaicRestrictionTransactionV1Descriptor(
+    new models.AccountRestrictionFlags(
+      models.AccountRestrictionFlags.MOSAIC_ID.value |
+        models.AccountRestrictionFlags.BLOCK.value,
+    ),
+    [new models.UnresolvedMosaicId(generateMosaicAliasId('symbol.xym'))],
+  ),
+  'block-transfer': new descriptors.AccountOperationRestrictionTransactionV1Descriptor(
+    new models.AccountRestrictionFlags(
+      models.AccountRestrictionFlags.TRANSACTION_TYPE.value |
+        models.AccountRestrictionFlags.OUTGOING.value |
+        models.AccountRestrictionFlags.BLOCK.value,
+    ),
+    [models.TransactionType.TRANSFER],
+  ),
+};
+
+for (const [name, descriptor] of Object.entries(examples)) {
+  const transaction = facade.createTransactionFromTypedDescriptor(
+    descriptor,
+    alice.publicKey,
+    100,
+    2 * 60 * 60,
+  );
+  const signature = alice.signTransaction(transaction);
+  if (!facade.verifyTransaction(transaction, signature))
+    throw new Error('署名検証に失敗しました');
+  const payload = SymbolTransactionFactory.attachSignature(transaction, signature);
+  writeFileSync(`${name}.json`, payload);
+}
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/restriction/account_restrictions.py"
+from pathlib import Path
+from symbolchain.symbol.IdGenerator import generate_mosaic_alias_id
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice, bob
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+examples = {
+    'block-incoming': {
+        'type': 'account_address_restriction_transaction_v1',
+        'restriction_flags': 'address block',
+        'restriction_additions': [bob.address],
+    },
+    'block-outgoing': {
+        'type': 'account_address_restriction_transaction_v1',
+        'restriction_flags': 'address outgoing block',
+        'restriction_additions': [bob.address],
+    },
+    'block-mosaic': {
+        'type': 'account_mosaic_restriction_transaction_v1',
+        'restriction_flags': 'mosaic_id block',
+        'restriction_additions': [generate_mosaic_alias_id('symbol.xym')],
+    },
+    'block-transfer': {
+        'type': 'account_operation_restriction_transaction_v1',
+        'restriction_flags': 'transaction_type outgoing block',
+        'restriction_additions': ['transfer'],
+    },
+}
+
+for name, descriptor in examples.items():
+    transaction = facade.create_transaction_from_descriptor(
+        {**descriptor}, alice.public_key, 100, 2 * 60 * 60
+    )
+    signature = alice.sign_transaction(transaction)
+    if not facade.verify_transaction(transaction, signature):
+        raise ValueError('署名検証に失敗しました')
+    payload = TransactionFactory.attach_signature(transaction, signature)
+    Path(f'{name}.json').write_text(payload, encoding='utf8')
+```
+
+</TabItem>
+</Tabs>
+
+解除時は同じフラグを指定し、`restrictionAdditions`／`restriction_additions` を空にして、
+同じ値を `restrictionDeletions`／`restriction_deletions` に入れます。
+`block` を外すと許可リストになります。特に操作型の許可リストでは、設定を変更する操作型自身も許可する必要があります。
+
+`GET /restrictions/account/{address}` で登録内容を確認します。制限された転送は失敗コードを返すことを確認し、解除後に再確認します。
+この例の `block-mosaic` は `symbol.xym` のエイリアスを指定しています。対象ネットワークで解決される通貨を確認してください。
+
+## 10.2 グローバルモザイク制限を設定する
+
+[モザイク](mosaic.mdx)で `restrictable` を付けて発行したモザイクを使います。
+所有者 Alice がキー `membership` の値を1と等しい（`eq`）ことに制限します。
+初回のグローバルルールは旧型 `none`、旧値0、アドレスの未設定値は `0xFFFFFFFFFFFFFFFF` です。
+送信元 Alice と受信者 Bob の両方へ値1を付けます。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/restriction/mosaic-restrictions.ts"
+import {
+  mosaicRestrictionGenerateKey,
+  models,
+  SymbolFacade,
+  SymbolTransactionFactory,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice, bob } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const id = process.env.MOSAIC_ID;
+
+if (!id) throw new Error('MOSAIC_ID が必要です');
+
+const mosaicId = BigInt(`0x${id}`);
+
+const restrictionKey = mosaicRestrictionGenerateKey('membership');
+
+// 内部トランザクションには個別の期限・手数料・署名を付けない。
+const rule = facade.createEmbeddedTransactionFromTypedDescriptor(
+  new descriptors.MosaicGlobalRestrictionTransactionV1Descriptor(
+    new models.UnresolvedMosaicId(mosaicId),
+    new models.UnresolvedMosaicId(0n),
+    restrictionKey,
+    0n,
+    1n,
+    models.MosaicRestrictionType.NONE,
+    models.MosaicRestrictionType.EQ,
+  ),
+  alice.publicKey,
+);
+
+// 内部トランザクションには個別の期限・手数料・署名を付けない。
+const addresses = [alice, bob].map((account) =>
+  facade.createEmbeddedTransactionFromTypedDescriptor(
+    new descriptors.MosaicAddressRestrictionTransactionV1Descriptor(
+      new models.UnresolvedMosaicId(mosaicId),
+      restrictionKey,
+      0xffffffffffffffffn,
+      1n,
+      account.address,
+    ),
+    alice.publicKey,
+  ),
+);
+
+const embeddedTransactions = [rule, ...addresses];
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const aggregateTransaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.AggregateCompleteTransactionV3Descriptor(
+    SymbolFacade.hashEmbeddedTransactions(embeddedTransactions),
+    embeddedTransactions,
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+) as models.AggregateCompleteTransactionV3;
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(aggregateTransaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(aggregateTransaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(
+  aggregateTransaction,
+  signature,
+);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/restriction/mosaic_restrictions.py"
+import os
+from symbolchain.symbol.Restriction import mosaic_restriction_generate_key
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from accounts.key_store import alice, bob
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+mosaic_id = int(os.environ['MOSAIC_ID'], 16)
+
+key = mosaic_restriction_generate_key('membership')
+
+# 内部トランザクションには個別の期限・手数料・署名を付けない。
+rule = facade.create_embedded_transaction_from_descriptor(
+    {
+        'type': 'mosaic_global_restriction_transaction_v1',
+        'mosaic_id': mosaic_id,
+        'reference_mosaic_id': 0,
+        'restriction_key': key,
+        'previous_restriction_value': 0,
+        'new_restriction_value': 1,
+        'previous_restriction_type': 'none',
+        'new_restriction_type': 'eq',
+    },
+    alice.public_key,
+)
+
+# 内部トランザクションには個別の期限・手数料・署名を付けない。
+addresses = [
+    facade.create_embedded_transaction_from_descriptor(
+        {
+            'type': 'mosaic_address_restriction_transaction_v1',
+            'mosaic_id': mosaic_id,
+            'restriction_key': key,
+            'previous_restriction_value': 18446744073709551615,
+            'new_restriction_value': 1,
+            'target_address': account.address,
+        },
+        alice.public_key,
+    )
+    for account in (alice, bob)
+]
+
+embedded_transactions = [rule, *addresses]
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+aggregate_tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'aggregate_complete_transaction_v3',
+        'transactions_hash': SymbolFacade.hash_embedded_transactions(
+            embedded_transactions
+        ),
+        'transactions': embedded_transactions,
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(aggregate_tx)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(aggregate_tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(aggregate_tx, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+このコードはルールと値が未設定の場合に使います。更新前に `GET /restrictions/mosaic?mosaicId={mosaicId}` を検索し、
+旧値・旧型を実際の状態に合わせてください。異なる旧値を指定すると失敗します。
+ルールを無効化する場合は現在の旧値・旧型と、新型 `none` を指定します。
+
+登録後にモザイクの転送を試し、両者が値1なら通ることを確認します。
+Bob の値を2へ変更すると条件不一致となり、Alice から Bob への転送が失敗することを確認できます。
+
+## 参照資料
+
+- [速習Symbolブロックチェーン：制限](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/11_restriction.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)

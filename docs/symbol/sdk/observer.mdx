@@ -1,0 +1,226 @@
+---
+title: 監視
+description: WebSocket の購読、受信・ブロック・連署要求の検知と切断後の照合。
+slug: /symbol/sdk/observer
+sidebar_position: 9
+tags:
+- SymbolSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+SDK 3.3.3 は WebSocket リスナーを提供しません。TypeScript は `ws`、Python は `websockets` で接続します。
+[環境構築](environment.mdx)で依存関係をインストールし、[学習用アカウント](learning-accounts.mdx)を準備してください。
+
+## 9.1 UID を受け取って購読する
+
+REST URL と同じノードの WebSocket URL を `SYMBOL_WS` に設定します。HTTPS の場合は通常 `wss://ホスト:ポート/ws` です。
+ノードのリバースプロキシ設定によって URL が異なるので、公開されている接続先を確認してください。
+接続後にサーバーから届く `uid` を使って各 topic を subscribe します。
+
+```bash
+export SYMBOL_WS='wss://401-sai-dual.symboltest.net:3001/ws'
+```
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/observer/watch-events.ts"
+import WebSocket from 'ws';
+import { SymbolFacade } from 'symbol-sdk/symbol';
+import { alice } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// SDK とノードのネットワーク設定が一致することを確認する。
+async function checkNetwork() {
+  const info = await request('/node/info');
+  const properties = await request('/network/properties');
+  const seed = facade.network.generationHashSeed.toString();
+  const epoch = facade.network.datetimeConverter.epoch.getTime() / 1000;
+  if (
+    info.networkIdentifier !== facade.network.identifier ||
+    info.networkGenerationHashSeed !== seed ||
+    properties.network.generationHashSeed !== seed ||
+    properties.network.epochAdjustment !== `${epoch}s`
+  ) {
+    throw new Error('SDK と接続先の Testnet 設定が一致しません');
+  }
+}
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+await checkNetwork();
+
+const url = process.env.SYMBOL_WS;
+
+if (!url) throw new Error('SYMBOL_WS が必要です');
+
+const socket = new WebSocket(url, { handshakeTimeout: 15000 });
+
+const deadline = setTimeout(() => socket.close(), 180000);
+
+let subscribed = false;
+
+socket.on('message', (data) => {
+  try {
+    const event = JSON.parse(data.toString());
+    if (!subscribed && event.uid) {
+      for (const topic of [
+        'block',
+        `confirmedAdded/${alice.address}`,
+        `unconfirmedAdded/${alice.address}`,
+        `status/${alice.address}`,
+        `partialAdded/${alice.address}`,
+        `partialRemoved/${alice.address}`,
+      ]) {
+        socket.send(JSON.stringify({ uid: event.uid, subscribe: topic }));
+      }
+      subscribed = true;
+    } else {
+      console.log(event.topic, event.data);
+    }
+  } catch (error) {
+    console.error(error);
+    socket.close();
+    process.exitCode = 1;
+  }
+});
+
+socket.on('error', (error) => {
+  console.error(error);
+  socket.terminate();
+  process.exitCode = 1;
+});
+
+socket.on('close', () => {
+  clearTimeout(deadline);
+  console.log('接続終了。REST で未確認分を照合してください');
+});
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/observer/watch_events.py"
+import json
+import os
+import time
+import requests
+from websockets.sync.client import connect
+from websockets.exceptions import ConnectionClosed
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+# SDK とノードのネットワーク設定が一致することを確認する。
+def check_network():
+    info = request('/node/info')
+    properties = request('/network/properties')
+    seed = str(facade.network.generation_hash_seed)
+    epoch = int(facade.network.datetime_converter.epoch.timestamp())
+    if (
+        info['networkIdentifier'] != facade.network.identifier
+        or info['networkGenerationHashSeed'] != seed
+        or properties['network']['generationHashSeed'] != seed
+        or (properties['network']['epochAdjustment'] != f'{epoch}s')
+    ):
+        raise ValueError('SDK と接続先の Testnet 設定が一致しません')
+
+
+check_network()
+
+with connect(os.environ['SYMBOL_WS'], open_timeout=15) as socket:
+    uid = json.loads(socket.recv(timeout=15))['uid']
+    topics = [
+        'block',
+        f'confirmedAdded/{alice.address}',
+        f'unconfirmedAdded/{alice.address}',
+        f'status/{alice.address}',
+        f'partialAdded/{alice.address}',
+        f'partialRemoved/{alice.address}',
+    ]
+    for topic in topics:
+        socket.send(json.dumps({'uid': uid, 'subscribe': topic}))
+    until = time.monotonic() + 180
+    while time.monotonic() < until:
+        try:
+            event = json.loads(
+                socket.recv(timeout=min(15, max(0.01, until - time.monotonic())))
+            )
+        except TimeoutError:
+            continue
+        except ConnectionClosed as error:
+            print('接続終了:', error)
+            break
+        print(event.get('topic'), event.get('data'))
+
+print('接続終了。REST で未確認分を照合してください')
+```
+
+</TabItem>
+</Tabs>
+
+TypeScript は `node dist/observer/watch-events.js`、Python は `PYTHONPATH=src python src/observer/watch_events.py` で起動します。
+3分が経過するか、接続が切れると終了します。不正なJSONや接続時のエラーでは、再起動前に原因を確認してください。
+
+## 9.2 イベントの使い分け
+
+| Topic | 用途 |
+| --- | --- |
+| `block` | 新しいブロックを検知 |
+| `unconfirmedAdded/{address}` | アドレスに関係する未承認トランザクションを検知 |
+| `confirmedAdded/{address}` | ブロックに取り込まれたトランザクションを検知 |
+| `status/{address}` | トランザクションの失敗コードを受け取る |
+| `partialAdded/{address}` | 関係するボンデッドの連署要求を検知 |
+| `partialRemoved/{address}` | partial キャッシュからの除去を検知 |
+
+`confirmedAdded` は入金だけではありません。受信を判定する場合は、転送型・宛先・モザイク・金額を確認します。
+アグリゲートは内部トランザクションも調べ、エイリアス宛てなら取り込み高の解決レシートと照合します。
+`partialRemoved` だけでは、承認されたのか期限切れなのか判断できません。REST のステータスと取り込みを確認してください。
+
+## 9.3 切断中の取りこぼしを補う
+
+通知は履歴の再送を保証しません。再接続では新しい UID を受け取り、購読し直します。
+最後に処理した高さ・ハッシュを保存し、REST のブロックや履歴検索で未処理分を補完します。
+同じハッシュの通知を二度処理しないようにします。
+
+連署要求を受け取っても自動署名せず、[ロック](lock.mdx#72-bob-が連署する)または[オフライン署名](offline-signature.mdx)の確認手順に進みます。
+
+## 参照資料
+
+- [速習Symbolブロックチェーン：監視](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/10_observer.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)

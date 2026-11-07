@@ -1,82 +1,51 @@
 ---
-title: Symbol SDK入門：環境構築
-description: Symbol SDK を使った開発環境の準備。
+title: 環境構築
+description: TypeScript と Python で Symbol SDK 3.3.3 をインストールし、実行環境を確認します。
 slug: /symbol/sdk/environment
-sidebar_position: 2
+sidebar_position: 1
 tags:
 - SymbolSDK
 ---
 
-:::note[移行記事]
+TypeScript は **Node.js 24 以降**、Python は **3.10以降**を使います。
+対象は `symbol-sdk@3.3.3` と `symbol-sdk-python==3.3.3` です。
+SDK は鍵・トランザクション・署名を扱い、HTTP 通信と WebSocket 接続は別のライブラリで実装します。
 
-2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
-移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
-対象バージョンや検証状況を本文で確認してください。
+## プロジェクトを作る
 
-:::
+使用する言語のプロジェクトを作成し、コードを `src/` 以下に保存します。両方の言語を試す場合は、別々の作業ディレクトリを使います。
 
-この連載は既存原稿の学習資料です。最短で試す場合は [Symbol開発クイックスタート](../quickstart.md) を参照してください。
-
-この章では、旧原稿で使っていた Volta と npm による、独立した学習プロジェクトの準備を説明します。
-Commons 本体の開発には [README](https://github.com/nem-symbol-commons/nem-symbol-commons.github.io/blob/main/README.md) の mise・pnpm を使ってください。
-移行時に TypeScript / JavaScript 向け SDK を 3.3.3 に固定しました。Python / Dart の依存バージョンの整理は未完了です。
-
-## 2.1 Visual Studio Code (VS Code) のインストール
-
-まずは、公式サイトから自分のパソコンに合ったものをダウンロードしてインストールしましょう。
-
-- [VS Code 公式サイト](https://code.visualstudio.com/)
-
-## 2.2 Volta のインストール
-
-Volta は Node.js や npm のバージョン管理を簡単にしてくれるツールです。
-
-Volta の公式手順にしたがって、次のコマンドをターミナルで実行します。
-
-```bash
-curl https://get.volta.sh | bash
+```text
+src/
+├── environment/
+├── accounts/
+├── transactions/
+├── mosaic/
+├── namespace/
+├── metadata/
+├── lock/
+├── multisig/
+├── observer/
+├── restriction/
+├── offline-signature/
+└── verify/
 ```
 
-詳細: [Volta 公式サイト](https://volta.sh/)
+Python のディレクトリ名は `offline_signature` とします。以下の実行コマンドは Linux / macOS / WSL を想定しています。
 
-## 2.3 Node.js と npm のインストール
-
-Volta を使って Node.js（npm も一緒に入ります）をインストールします。
+### TypeScript
 
 ```bash
-volta install node@24.18.1
-```
-
-インストールできたら、バージョンを確認してみましょう。
-
-```bash
-node -v
-npm -v
-```
-
-## 2.4 プロジェクトディレクトリの作成
-
-次に、作業用のフォルダ（ディレクトリ）を作って、その中に移動します。
-
-```bash
-mkdir my-symbol-project
-cd my-symbol-project
-```
-
-`my-symbol-project` の部分は好きな名前に変えて大丈夫です。
-
-## 2.5 symbol-sdk のインストール
-
-作ったフォルダの中で、次のコマンドを実行して symbol-sdk をインストールします。
-
-```bash
+mkdir symbol-typescript
+cd symbol-typescript
 npm init -y
 npm pkg set type=module
-npm install --save-exact symbol-sdk@3.3.3
-npm install --save-dev --save-exact typescript@6.0.2
-```
 
-TypeScript の例を実行する場合は `src/` に保存し、以下を `tsconfig.json` に設定します。
+# SDKと、HTTP・WebSocketのコード例に必要な依存関係をインストールする。
+npm install --save-exact symbol-sdk@3.3.3 ws@8.18.3
+npm install --save-dev --save-exact typescript@6.0.2 @types/node@24 @types/ws@8
+mkdir -p src/environment
+```
 
 ```json title="tsconfig.json"
 {
@@ -87,35 +56,67 @@ TypeScript の例を実行する場合は `src/` に保存し、以下を `tscon
     "rootDir": "src",
     "outDir": "dist",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"]
 }
 ```
 
-`npx tsc` でビルドし、対応する `dist/` 内の JavaScript ファイルを `node` で実行します。
-他の章のコードを参照する例では、必要なクラスを同じプロジェクト内に配置してください。
+`npm list symbol-sdk` で3.3.3を確認します。次のファイルを保存し、SDK を読み込めることを確認します。
+`SymbolFacade('testnet')` は Testnet 用の設定を選択します。この時点ではノードに接続しません。
 
-## 2.6 コード品質ツール（ESLint・Prettier）の導入（推奨）
+```ts title="src/environment/check-sdk.ts"
+import { SymbolFacade } from 'symbol-sdk/symbol';
 
-独立したサンプルプロジェクトで必要な場合に導入します。Commons の Markdown / MDX は自動整形を無効にしているため、この節をサイトの文書設定には適用しません。
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
 
-### 2.6.1 ESLint・Prettier のインストール
-
-```bash
-npm install --save-dev eslint prettier
+console.log(facade.network.name, facade.network.identifier);
 ```
 
-### 2.6.2 初期設定
-
-ESLint の初期設定は、次のコマンドでできます。
-
 ```bash
-npx eslint --init
+npx tsc
+node dist/environment/check-sdk.js
 ```
 
-設定形式は ESLint の世代で異なります。現在の設定形式は [ESLint の公式ガイド](https://eslint.org/docs/latest/use/configure/configuration-files)を参照してください。
+### Python
 
-Prettier の設定ファイル（.prettierrc）は必要なら自分で作ってみてください。
+```bash
+mkdir symbol-python
+cd symbol-python
+python3 -m venv .venv
+source .venv/bin/activate
 
-これでコード品質ツールの準備も完了です。
+# 仮想環境にSDKと通信ライブラリをインストールする。
+python -m pip install symbol-sdk-python==3.3.3 requests==2.34.2 websockets==15.0.1
+mkdir -p src/environment
+```
+
+`python -m pip show symbol-sdk-python` で3.3.3を確認します。
+次のファイルを保存し、SDK を読み込めることを確認します。
+
+```py title="src/environment/check_sdk.py"
+from symbolchain.facade.SymbolFacade import SymbolFacade
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+print(facade.network.name, facade.network.identifier)
+```
+
+プロジェクトルートから、`src/` をモジュール検索パスに指定して実行します。
+
+```bash
+PYTHONPATH=src python src/environment/check_sdk.py
+```
+
+Windows の仮想環境は PowerShell で `.venv\Scripts\Activate.ps1` を実行して有効にします。
+`PYTHONPATH` は `$env:PYTHONPATH="src"` と設定します。
+
+両言語とも `testnet 152` と表示されれば準備完了です。[アカウント](accounts.mdx)で鍵とアドレスを生成します。
+
+## 参照資料
+
+- [XEMBook 著「速習Symbolブロックチェーン」：環境構築](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/02_setting.md)（[MIT ライセンス・著作権表示](/licenses/quick-learning-symbol.txt)）
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)

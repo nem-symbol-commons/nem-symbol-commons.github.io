@@ -1,0 +1,293 @@
+---
+title: モザイク
+description: 独自モザイクの定義、供給量変更、転送と確認。
+slug: /symbol/sdk/mosaic
+sidebar_position: 4
+tags:
+- SymbolSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+モザイクは独自の資産です。ID、可分性、存続期間、変更可能な供給量などを定義します。
+[学習用アカウント](learning-accounts.mdx)を準備してください。
+供給量や転送量は、作成するモザイクの最小単位で指定します。
+
+## 4.1 定義と供給量をまとめて登録する
+
+可分性2、供給量1,000.00のモザイクを作ります。`duration` はブロック数、0は無期限です。
+供給量の変更、転送、グローバル制限を使えるよう、`supply_mutable`・`transferable`・`restrictable` を指定します。
+nonce と所有者から決まるIDを、定義と供給量変更の両方で使います。
+発行にはトランザクション手数料とは別にレンタル料がかかります。`GET /network/fees/rental` の `effectiveMosaicRentalFee` を確認してください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/mosaic/create-mosaic.ts"
+import { randomInt } from 'node:crypto';
+import {
+  generateMosaicId,
+  models,
+  SymbolFacade,
+  SymbolTransactionFactory,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+// 32ビットの nonce と所有者のアドレスから、モザイクIDを計算する。
+const nonce = randomInt(0x1_0000_0000);
+
+const id = generateMosaicId(alice.address, nonce);
+
+// モザイクの可分性と、供給量変更・転送・制限を許可するフラグを指定する。
+const definition = facade.createEmbeddedTransactionFromTypedDescriptor(
+  new descriptors.MosaicDefinitionTransactionV1Descriptor(
+    new models.MosaicId(id),
+    new models.BlockDuration(0n),
+    new models.MosaicNonce(nonce),
+    new models.MosaicFlags(
+      models.MosaicFlags.SUPPLY_MUTABLE.value |
+        models.MosaicFlags.TRANSFERABLE.value |
+        models.MosaicFlags.RESTRICTABLE.value,
+    ),
+    2,
+  ),
+  alice.publicKey,
+);
+
+// 可分性2の100,000最小単位、つまり1,000.00を発行する。
+const supply = facade.createEmbeddedTransactionFromTypedDescriptor(
+  new descriptors.MosaicSupplyChangeTransactionV1Descriptor(
+    new models.UnresolvedMosaicId(id),
+    new models.Amount(100_000n),
+    models.MosaicSupplyChangeAction.INCREASE,
+  ),
+  alice.publicKey,
+);
+
+console.log('mosaicId:', id.toString(16).toUpperCase().padStart(16, '0'));
+
+const embeddedTransactions = [definition, supply];
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const aggregateTransaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.AggregateCompleteTransactionV3Descriptor(
+    SymbolFacade.hashEmbeddedTransactions(embeddedTransactions),
+    embeddedTransactions,
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+) as models.AggregateCompleteTransactionV3;
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(aggregateTransaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(aggregateTransaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(
+  aggregateTransaction,
+  signature,
+);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/mosaic/create_mosaic.py"
+import secrets
+from symbolchain.symbol.IdGenerator import generate_mosaic_id
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from accounts.key_store import alice
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+nonce = secrets.randbits(32)
+
+mosaic_id = generate_mosaic_id(alice.address, nonce)
+
+# モザイクの可分性と、供給量変更・転送・制限を許可するフラグを指定する。
+definition = facade.create_embedded_transaction_from_descriptor(
+    {
+        'type': 'mosaic_definition_transaction_v1',
+        'nonce': nonce,
+        'duration': 0,
+        'flags': 'supply_mutable transferable restrictable',
+        'divisibility': 2,
+    },
+    alice.public_key,
+)
+
+# 可分性2の100,000最小単位、つまり1,000.00を発行する。
+supply = facade.create_embedded_transaction_from_descriptor(
+    {
+        'type': 'mosaic_supply_change_transaction_v1',
+        'mosaic_id': mosaic_id,
+        'action': 'increase',
+        'delta': 100000,
+    },
+    alice.public_key,
+)
+
+print('mosaicId:', f'{mosaic_id:016X}')
+
+embedded_transactions = [definition, supply]
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+aggregate_tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'aggregate_complete_transaction_v3',
+        'transactions_hash': SymbolFacade.hash_embedded_transactions(
+            embedded_transactions
+        ),
+        'transactions': embedded_transactions,
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(aggregate_tx)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(aggregate_tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(aggregate_tx, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+署名済み JSON を `payload.json` に保存し、[送信手順](transactions.mdx#32-署名済みペイロードを送信する)で登録します。
+取り込みを確認してから次へ進みます。再実行すると別の nonce とIDになります。
+
+## 4.2 モザイクを送る
+
+表示した16桁のIDを `MOSAIC_ID` に設定します。`0x` は付けません。
+100最小単位を送るので、表示上は1.00になります。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/mosaic/transfer-mosaic.ts"
+import {
+  models,
+  SymbolTransactionFactory,
+  SymbolFacade,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice, bob } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const id = process.env.MOSAIC_ID;
+
+if (!id || !/^[0-9a-fA-F]{16}$/.test(id))
+  throw new Error('MOSAIC_ID に16桁のIDを設定してください');
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const transaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.TransferTransactionV1Descriptor(bob.address, [
+    new descriptors.UnresolvedMosaicDescriptor(
+      new models.UnresolvedMosaicId(BigInt(`0x${id}`)),
+      new models.Amount(100n),
+    ),
+  ]),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+);
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(transaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(transaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(transaction, signature);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/mosaic/transfer_mosaic.py"
+import os
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice, bob
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+mosaic_id = int(os.environ['MOSAIC_ID'], 16)
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+transaction = facade.create_transaction_from_descriptor(
+    {
+        'type': 'transfer_transaction_v1',
+        'recipient_address': bob.address,
+        'mosaics': [{'mosaic_id': mosaic_id, 'amount': 100}],
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(transaction)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(transaction, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(transaction, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+グローバル制限を追加した後は、送信元・受信先の双方が条件を満たす必要があります。
+
+## 4.3 供給量を変更・確認する
+
+`supply_mutable` のモザイクは、所有者が `mosaic_supply_change_transaction_v1` で供給量を変更します。
+供給量変更の descriptor を `facade.createTransactionFromTypedDescriptor`／`facade.create_transaction_from_descriptor` に渡せば単独で構築できます。
+転送と同様に署名者・期限を指定し、サイズに応じた手数料を設定してから署名します。
+`increase` は増加、`decrease` は減少です。減らす数量を所有者が保有している必要があります。
+
+| REST API | 確認内容 |
+| --- | --- |
+| `GET /mosaics/{mosaicId}` | 所有者、供給量、可分性、フラグ、期間 |
+| `GET /accounts/{address}` | 対象アカウントの保有量 |
+
+モザイクの存続期間とネームスペースの有効期限は独立しています。
+
+## 参照資料
+
+- [速習Symbolブロックチェーン：モザイク](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/05_mosaic.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)

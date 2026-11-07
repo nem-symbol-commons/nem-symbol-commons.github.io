@@ -5,8 +5,7 @@ sidebar_position: 1
 description: Symbol 固有の仕様とアプリケーション開発を扱います。
 ---
 
-Symbol 固有の仕様と開発を扱うカテゴリです。
-アカウント、トランザクション、モザイク、ネームスペースなどのテーマを、対象バージョンと参照資料を明記して整理していきます。
+Symbol のアカウント、トランザクション、モザイク、ネームスペースなどの仕様と開発手順を調べられます。
 
 ## 調べるための入口
 
@@ -18,15 +17,24 @@ Symbol 固有の仕様と開発を扱うカテゴリです。
 
 ## 最初に試す
 
-[Symbol開発クイックスタート](quickstart.md)で、Testnet の情報取得とローカル署名を試せます。
-対象は `symbol-sdk@3.3.3` です。送信は明示的に指定した場合だけ行う構成です。
+[Testnetへの接続](quickstart.md)で、`curl` を使ってノードの稼働状態とブロック高を確認します。
 
-## Symbol SDK入門
+## SDK入門
 
-旧 nemnesia の連載を移行しました。TypeScript・Python・Dart の例を含み、各章の検証状況は記事中に記載しています。
+TypeScript（Node.js）と Python で、環境構築から署名・送信、各種機能、検証まで学びます。
+対象は `symbol-sdk@3.3.3` と `symbol-sdk-python==3.3.3` です。
 
-1. [はじめに](sdk/introduction.mdx)
-2. [環境構築](sdk/environment.mdx)
-3. [アカウント](sdk/accounts.mdx)
-4. [学習用アカウントの準備](sdk/learning-accounts.mdx)
-5. [トランザクション](sdk/transactions.mdx)
+1. [環境構築](sdk/environment.mdx)
+2. [アカウント](sdk/accounts.mdx)
+3. [トランザクション](sdk/transactions.mdx)
+4. [モザイク](sdk/mosaic.mdx)
+5. [ネームスペース](sdk/namespace.mdx)
+6. [メタデータ](sdk/metadata.mdx)
+7. [ロック](sdk/lock.mdx)
+8. [マルチシグ](sdk/multisig.mdx)
+9. [監視](sdk/observer.mdx)
+10. [制限](sdk/restriction.mdx)
+11. [オフライン署名](sdk/offline-signature.mdx)
+12. [検証](sdk/verify.mdx)
+
+[学習用アカウントの準備](sdk/learning-accounts.mdx)で、各章で使うアカウントを作成します。

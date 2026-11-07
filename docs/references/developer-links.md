@@ -24,7 +24,7 @@ Symbol の [従来のドキュメント](https://docs.symbol.dev/)にも SDK や
 
 - [JavaScript SDK](https://github.com/symbol/symbol/tree/main/sdk/javascript): `symbol-sdk`。NEM と Symbol の両方に対応し、`symbol-sdk/nem` と `symbol-sdk/symbol` を使い分けます。
 - [Python SDK](https://github.com/symbol/symbol/tree/main/sdk/python): 両チェーンのモデルや署名処理を確認するための実装。
-- [symbol-sdk 3.3.3](https://www.npmjs.com/package/symbol-sdk/v/3.3.3): このサイトのクイックスタートで検証した JavaScript SDK の公開版。npm のページにアクセスできない場合は [公開メタデータ](https://registry.npmjs.org/symbol-sdk/3.3.3)で版と配布情報を確認できます。
+- [symbol-sdk 3.3.3](https://www.npmjs.com/package/symbol-sdk/v/3.3.3): SDK入門で使用する TypeScript / JavaScript SDK の公開版。npm のページにアクセスできない場合は [公開メタデータ](https://registry.npmjs.org/symbol-sdk/3.3.3)で版と配布情報を確認できます。
 - [REST 実装](https://github.com/symbol/symbol/tree/main/client/rest): Symbol REST のルート、検証、設定を調べる入口。
 - [Symbol OpenAPI ソース](https://github.com/symbol/symbol-openapi): REST のスキーマと変更履歴。
 - [NEM SDK の旧実装](https://github.com/QuantumMechanics/NEM-sdk): `nem-sdk` を使う既存記事を読む場合の参照先。このサイトのクイックスタートでは使用しません。
@@ -62,7 +62,7 @@ Explorer のページ表示と、全機能・検索結果の正常性は別で�
 
 ## このサイトの実践記事
 
-- [Symbol開発クイックスタート](../symbol/quickstart.md)
+- [Symbol Testnetへの接続](../symbol/quickstart.md)
 - [NEM開発クイックスタート](../nem/quickstart.md)
 - [REST APIの基本](rest-api.md)
 

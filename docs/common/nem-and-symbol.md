@@ -65,8 +65,8 @@ NEM に Symbol と同じ投票鍵やファイナライズ API があると仮定
 ## コード例を選ぶとき
 
 `symbol-sdk` というパッケージ名だけでは世代を特定できません。古い 1.x / 2.x の例には `RepositoryFactoryHttp` などを使うものがあります。
-このサイトのクイックスタートは `symbol-sdk@3.3.3` を固定し、Facade でローカル署名、`fetch` で HTTP 通信を行います。
+[Symbol SDK入門](../symbol/sdk/environment.mdx)と NEM開発クイックスタートは `symbol-sdk@3.3.3` を使います。署名は Facade、HTTP 通信は `fetch` などの HTTP クライアントが担当します。
 SDK 内で両チェーンに対応していても、チェーンを指定する import と Facade は使い分けます。
 
-- [Symbol開発クイックスタート](../symbol/quickstart.md)
+- [Symbol Testnetへの接続](../symbol/quickstart.md)
 - [NEM開発クイックスタート](../nem/quickstart.md)

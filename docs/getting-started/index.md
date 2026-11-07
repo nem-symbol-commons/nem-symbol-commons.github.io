@@ -13,7 +13,7 @@ NEM & Symbol Commons は、NEM(NIS1)と Symbol の開発・運用に役立つ知
 
 NEM と Symbol について知るには、[両チェーンの違い](../common/nem-and-symbol.md)と[基本用語](glossary.md)から読み始めてください。
 
-開発を試す方は、[Symbol](../symbol/quickstart.md)または [NEM](../nem/quickstart.md) のクイックスタートへ進んでください。
+Symbol の開発は [SDK入門](../symbol/sdk/environment.mdx)、接続確認は [Testnetへの接続](../symbol/quickstart.md)へ進みます。NEM は [NEM開発クイックスタート](../nem/quickstart.md)を参照してください。
 送信を試す際は、Testnet 用の専用アカウントを使います。
 
 - [開発者向けリンク集](../references/developer-links.md)：公式資料、GitHub、SDK、Explorer。

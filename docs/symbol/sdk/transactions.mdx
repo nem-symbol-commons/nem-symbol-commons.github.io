@@ -1,296 +1,605 @@
 ---
-title: Symbol SDK入門：トランザクション
-description: トランザクションのライフサイクル、転送の作成と署名。
+title: トランザクション
+description: 転送とアグリゲートの構築、署名、REST 送信、取り込みと履歴の確認。
 slug: /symbol/sdk/transactions
-sidebar_position: 5
+sidebar_position: 3
+tags:
+- SymbolSDK
 ---
 
-import Tabs from "@theme/Tabs";
-import TabItem from "@theme/TabItem";
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
-:::note[移行記事]
+トランザクションは、送信者が署名した処理の要求です。XYM の転送だけでなく、モザイクの発行やメタデータの登録もトランザクションで行います。
+SDK で構築・署名しただけではチェーンに記録されません。署名済みデータをノードへ送信し、検証を通過してブロックに取り込まれる必要があります。
 
-2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
-移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
-対象バージョンや検証状況を本文で確認してください。
+[学習用アカウント](learning-accounts.mdx)の Alice から Bob に1 XYMを送ります。Alice に1 XYMと手数料を賄う Testnet XYM を用意してください。
+通常の転送では Alice が署名し、Bob の署名は不要です。
 
-:::
+```mermaid
+sequenceDiagram
+    participant Alice as Alice（送信者）
+    participant Node as Testnet ノード
+    participant Chain as ブロックチェーン
+    participant Bob as Bob（受信者）
+    Note over Alice: 宛先・金額・期限・手数料を決めて署名
+    Alice->>Node: 署名済みペイロードを送信
+    Node-->>Alice: 受付応答（取り込み前）
+    Node->>Chain: 検証を通過した転送をブロックへ取り込む
+    Bob->>Node: アカウント情報を取得
+    Node-->>Bob: 取り込み後の残高
+```
 
-この連載は既存原稿の学習資料です。最短で試す場合は [Symbol開発クイックスタート](../quickstart.md) を参照してください。
+## 3.1 転送を構築して署名する
 
-## 5.1 トランザクションとは
+### 処理の内容を descriptor で指定する
 
-### 5.1.1 トランザクションの基本概念
+TypeScript は `descriptors.TransferTransactionV1Descriptor` に宛先・モザイク・メッセージを渡します。
+`new models.Amount(...)` などの型を明示するため、引数の種類をコンパイル時に確認できます。
+Python は `type: 'transfer_transaction_v1'` を含む辞書を descriptor として使います。
+Python 3.3.3 に TypeScript と同じ descriptor クラス群はありませんが、Facade のメソッドで同じ構築手順を取れます。
 
-ブロックチェーンにおける「トランザクション」とは、**ネットワークに記録される操作や処理の単位**を指します。  
-銀行における「振込」や「引き落とし」が処理の単位であるのと同様に、ブロックチェーン上では「アカウントからアカウントへの送金」や
-「モザイクの発行」といった操作がトランザクションです。
+| 項目 | 指定する値と役割 |
+| --- | --- |
+| 宛先 | Bob の Testnet アドレス。署名後に宛先を変えると署名が無効になるため、署名し直します。 |
+| モザイクと数量 | `symbol.xym` のエイリアスと `1_000_000` 最小単位。XYM の可分性は6なので1 XYMです。 |
+| メッセージ | UTF-8 の文字列。平文では先頭に `0x00` を付け、秘密情報を書き込みません。 |
+| 署名者の公開鍵 | Alice の公開鍵。秘密鍵は構築時の descriptor に含めません。 |
+| 手数料係数 | 1バイト当たりの最大手数料を計算する係数。数量は XYM の最小単位です。 |
+| 有効期限までの秒数 | `2 * 60 * 60` で2時間。SDK がネットワーク時刻へ変換します。 |
 
-トランザクションは、署名された後にネットワークへアナウンスされ、ノードに伝播し、最終的にブロックに取り込まれることで台帳に記録されます。  
-これにより、誰でも検証可能な形で「いつ」「誰が」「何をしたか」が保証されます。
+### Facade でトランザクションを作る
 
-### 5.1.2 Symbol ブロックチェーンにおける役割
+`createTransactionFromTypedDescriptor`／`create_transaction_from_descriptor` に
+「descriptor・署名者の公開鍵・手数料係数・期限までの秒数」を渡します。
+ネットワーク、署名者、期限、最大手数料が設定されるため、これらを手動で組み立てる必要はありません。
+OS の時刻を正しく合わせておいてください。
 
-Symbol ブロックチェーンでは、送信やモザイク発行などの操作をトランザクションで指定します。ブロック生成に伴う報酬や期限切れ処理など、明示的な利用者トランザクション以外による状態変化もあります。
+手数料係数100なら、転送の最大手数料は `トランザクションのサイズ × 100` です。
+実際の手数料は取り込み先ブロックの係数で決まり、指定した最大手数料を超えません。
+係数が不足すると取り込まれない場合があるため、`GET /network/fees/transaction` も確認します。
+期限は取り込みを待てる上限で、取り込み時刻の予約ではありません。
 
-- アカウント間の XYM 送金
-- 新しいモザイク（トークン）の発行
-- ネームスペースの登録
-- マルチシグアカウントの設定
-- アグリゲートトランザクションによる複数操作の一括実行
+### Alice が署名する
 
-これらはすべて「トランザクション」という形式で表現され、ブロックチェーンに取り込まれることで有効になります。  
-つまり、トランザクションは **ブロックチェーンを動かす最小単位の命令** だと捉えることができます。
-
-### 5.1.3 トランザクションの種類（概要）
-
-Symbol では多様な用途に対応するために、複数の種類のトランザクションが用意されています。代表的なものを以下に挙げます。
-
-- **転送トランザクション**  
-  アカウント間で XYM やモザイクを送信するトランザクション。メッセージも付与可能。
-
-- **アグリゲートトランザクション**  
-  複数のトランザクションを一つにまとめて実行する仕組み。複数署名者による共同署名も可能。
-
-- **モザイク関連トランザクション**  
-  新規モザイクの作成、供給量の変更、制約（譲渡制限など）の設定を行う。
-
-- **ネームスペース関連トランザクション**  
-  ネームスペースの登録や更新を行う。モザイクやアカウントにフレンドリーな名前を付与できる。
-- **アカウント関連トランザクション**  
-  マルチシグ設定、キーリンク、アカウント設定変更など。
-
-これらのトランザクションが組み合わさることで、Symbol ブロックチェーン上で多様なアプリケーションを構築することができます。
-
-## 5.2 トランザクションのライフサイクル
-
-トランザクションは作成されてからブロックに記録されるまで、いくつかの段階を経ます。  
-この流れを理解しておくことは、アプリケーション開発において「いつ送金が完了したとみなせるか」
-「どのタイミングでエラー処理を行うか」を判断する上で重要です。
-
-### 5.2.1 ライフサイクルの流れ
-
-1. **作成**  
-   アプリケーションやウォレットで、送金や操作の内容を指定してトランザクションを生成します。  
-   例: 送信先アドレス、送信量、手数料、メッセージなどを組み込む。
-2. **署名**  
-   作成したトランザクションを秘密鍵で署名します。これにより、
-
-   - 対応する秘密鍵で承認されたこと
-   - 改ざんされていないこと
-
-   が保証されます。
-
-3. **アナウンス**  
-   署名済みトランザクションをノードに送信します。署名済みデータを HTTP クライアントで REST API へ送ります。SDK 3 系のモデル・署名処理と HTTP 通信は別です。
-4. **ネットワーク伝播**  
-   受け取ったノードは、P2P ネットワークを通じて他のノードへトランザクションを転送します。  
-   この段階ではまだブロックに取り込まれていないため「未承認」状態です。
-5. **ブロック取り込み**  
-   ノードの収集したトランザクションがバリデーションを通過すると、次に生成されるブロックに格納されます。  
-   ブロックに含まれると「承認済み」となり、さらに最終化が進むことで「確定」します。
-
-### 5.2.2 トランザクションのステータス
-
-トランザクションには以下のステータスがあります。
-
-- **Unconfirmed（未承認）**  
-  アナウンスされ、ネットワークに伝播しているが、まだブロックに含まれていない状態。
-
-- **Confirmed（承認済み）**  
-  ブロックに含まれ、チェーンに記録された状態。アプリケーションの要件に応じ、さらにファイナライズを待つかを判断します。
-
-- **Finalized（確定）**  
-  ファイナリティが到達し、チェーン分岐の影響を受けない状態。高額取引や重要な処理ではこの状態を待つことがあります。
-
-### 5.2.3 ノード間での伝播の仕組み
-
-Symbol のネットワークは P2P 方式で構築されています。
-
-1. クライアントがトランザクションをノード A にアナウンスする。
-2. ノード A は署名や手数料、アカウント残高などを検証する。
-3. 問題がなければ、ノード A はトランザクションを保持し、他のピアノードへ転送する。
-4. ピアへ伝播し、条件を満たせばブロックへ取り込まれる。次のブロックへの取り込みが保証されるわけではない。
-
-この仕組みにより、トランザクションは分散的かつ効率的に処理されます。
-
-## 5.3 転送トランザクション
-
-転送トランザクションは最も基本的なトランザクションです。XYM やモザイクを他のアカウントに送金するときに使用します。
-
-Symbol SDK では、以下の項目を指定してトランザクションを作成します：
-
-- 送信者
-- 宛先アドレス
-- 送信するモザイク
-- メッセージ（任意）
-- 手数料
-
-メッセージには文字列や暗号化されたメッセージを添付できます。
-手数料はトランザクションのサイズに応じて自動計算されますが、手動設定も可能です。
-
-以下は転送を作成する例です。5.3 と 5.4.1 の同じ言語のコードをつなげて使います。
-TypeScript は第 4 章の `src/KeyStore.ts` と同じディレクトリに配置し、TypeScript のビルド後に `KeyStore.js` を import する構成です。
-TypeScript のコンパイルでは `module` / `moduleResolution` を `NodeNext`、`target` を `ES2022` 以降にしてください。
-Python / Dart の依存バージョンと実行は未検証です。
+`signTransaction`／`sign_transaction` は Alice の秘密鍵で署名を作ります。
+署名を検証してから `attachSignature`／`attach_signature` でトランザクションに組み込み、送信用の JSON を生成します。
+金額や手数料などの署名対象を後から変更すると署名が無効になるため、内容を確定させてから署名してください。
 
 <Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts
-    import {
-      descriptors,
-      generateMosaicAliasId,
-      models,
-      SymbolFacade,
-      SymbolTransactionFactory,
-    } from 'symbol-sdk/symbol';
-    import { KeyStore } from './KeyStore.js';
+<TabItem value="ts" label="TypeScript">
 
-    const keyStore = new KeyStore('testnet');
+```ts title="src/transactions/transfer.ts"
+import { writeFileSync } from 'node:fs';
+import {
+  descriptors,
+  generateMosaicAliasId,
+  models,
+  SymbolFacade,
+  SymbolTransactionFactory,
+} from 'symbol-sdk/symbol';
+import { alice, bob } from '../accounts/key-store.js';
 
-    const facade = new SymbolFacade('testnet');
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
 
-    // 署名アカウント(送信者)
-    const aliceAccount = facade.createAccount(keyStore.AlicePrivateKey);
-    // 受信アカウント
-    const bobPublicAccount = facade.createPublicAccount(keyStore.BobPublicKey);
+// symbol.xym を未解決モザイクIDで指定し、1 XYMの転送内容を定義する。
+const descriptor = new descriptors.TransferTransactionV1Descriptor(
+  bob.address,
+  [
+    new descriptors.UnresolvedMosaicDescriptor(
+      new models.UnresolvedMosaicId(generateMosaicAliasId('symbol.xym')),
+      new models.Amount(1_000_000n),
+    ),
+  ],
+  new TextEncoder().encode('\0Hello, Symbol!'),
+);
 
-    // 転送モザイク設定
-    const mosaicId = generateMosaicAliasId('symbol.xym');
-    const mosaics = [
-      new descriptors.UnresolvedMosaicDescriptor(
-        new models.UnresolvedMosaicId(mosaicId),
-        new models.Amount(10_000000n)
-      ),
-    ];
+// 署名者・手数料係数・2時間後の期限を設定する。まだ署名は付いていない。
+const tx = facade.createTransactionFromTypedDescriptor(
+  descriptor,
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+);
 
-    // 平文メッセージ
-    const message = new TextEncoder().encode('\0Hello, Symbol!!');
+// Alice の秘密鍵で署名し、公開鍵で検証する。
+const signature = alice.signTransaction(tx);
 
-    // 転送トランザクションディスクリプタ生成
-    const transferTxDescriptor = new descriptors.TransferTransactionV1Descriptor(
-      bobPublicAccount.address,
-      mosaics,
-      message
-    );
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(tx, signature)) throw new Error('署名検証に失敗しました');
 
-    // 転送トランザクション生成
-    const transferTx = facade.createTransactionFromTypedDescriptor(
-      transferTxDescriptor,
-      aliceAccount.publicKey,
-      100, // 手数料係数
-      60 * 60 * 2 // 有効期限(秒)
-    );
+// 署名を組み込んだ送信データを保存する。保存だけではノードへ送信されない。
+const body = SymbolTransactionFactory.attachSignature(tx, signature);
 
-    console.log(transferTx.toJson());
-    ```
+writeFileSync('payload.json', body);
 
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py
-    import json
-    import os
-    import sys
+console.log('hash:', facade.hashTransaction(tx).toString());
 
-    from symbolchain import sc
-    from symbolchain.facade.SymbolFacade import SymbolFacade
-    from symbolchain.symbol.IdGenerator import generate_mosaic_alias_id
-    from symbolchain.symbol.TransactionFactory import TransactionFactory
+console.log('maxFee:', tx.fee.value.toString());
+```
 
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    from KeyStore import KeyStore
+</TabItem>
+<TabItem value="py" label="Python">
 
-    key_store = KeyStore('testnet')
+```py title="src/transactions/transfer.py"
+from pathlib import Path
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.IdGenerator import generate_mosaic_alias_id
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from accounts.key_store import alice, bob
 
-    facade = SymbolFacade('testnet')
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
 
-    # 署名アカウント(送信者)
-    alice_account = facade.create_account(key_store.AlicePrivateKey)
-    # 受信アカウント
-    bob_account = facade.create_public_account(key_store.BobPublicKey)
+# symbol.xym のエイリアスと、1 XYMを表す最小単位の数量を指定する。
+descriptor = {
+    'type': 'transfer_transaction_v1',
+    'recipient_address': bob.address,
+    'mosaics': [
+        {'mosaic_id': generate_mosaic_alias_id('symbol.xym'), 'amount': 1_000_000}
+    ],
+    'message': b'\0Hello, Symbol!',
+}
 
-    # 転送モザイク設定
-    namespace_id = generate_mosaic_alias_id('symbol.xym')
-    mosaics = [
-        {'mosaic_id': namespace_id, 'amount': 10_000000},
-    ]
+# 3.3.3で追加されたメソッドで、署名者・手数料・期限をまとめて設定する。
+tx = facade.create_transaction_from_descriptor(
+    descriptor,
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
 
-    # 平文メッセージ
-    message = b'\0Hello, Symbol!!'
+# Alice の秘密鍵で署名し、対応する公開鍵で検証する。
+signature = alice.sign_transaction(tx)
 
-    # 転送トランザクション生成
-    transfer_tx: sc.TransferTransactionV1 = facade.transaction_factory.create(
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名済みJSONを保存する。秘密鍵はJSONに含まれない。
+payload = TransactionFactory.attach_signature(tx, signature)
+
+Path('payload.json').write_text(payload, encoding='utf8')
+
+print('hash:', facade.hash_transaction(tx))
+
+print('maxFee:', tx.fee.value)
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+# TypeScript
+npx tsc
+node dist/transactions/transfer.js
+# Python
+PYTHONPATH=src python src/transactions/transfer.py
+```
+
+`payload.json` は署名済みデータです。秘密鍵は含みませんが、期限内なら第三者も送信できます。
+実行のたびに期限が変わり、別のハッシュになります。
+
+## 3.2 署名済みペイロードを送信する
+
+`payload.json` の `payload` は、署名を含めたトランザクションのバイト列を16進数にしたものです。
+これを `PUT /transactions` に送ります。SDK の構築・署名と HTTP 通信は別の処理です。
+HTTP 202などの受付応答は、ブロックへの取り込みを確約しません。
+
+次のファイルは `--announce` を付けた場合にだけ送信します。
+後続の章で表示した JSON ペイロードも `payload.json` に保存すれば同じ手順で送信できます。
+受信者・金額・手数料・ネットワークを確認してから実行してください。
+`SYMBOL_NODE` には[残高の確認](accounts.mdx#25-残高を確認する)で使った Testnet ノードの REST URL を設定します。
+ネットワーク識別子・generation hash seed・epoch が SDK の Testnet と一致しない場合は停止します。
+実ノードへのトランザクション送信は未検証です。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/transactions/announce.ts"
+import { readFileSync } from 'node:fs';
+import { SymbolFacade } from 'symbol-sdk/symbol';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// 署名済みJSONを送る前に、接続先のネットワークを照合する。
+async function announce(body: string, path = '/transactions') {
+  await checkNetwork();
+  return request(path, 'PUT', body);
+}
+
+// SDK とノードのネットワーク設定が一致することを確認する。
+async function checkNetwork() {
+  const info = await request('/node/info');
+  const properties = await request('/network/properties');
+  const seed = facade.network.generationHashSeed.toString();
+  const epoch = facade.network.datetimeConverter.epoch.getTime() / 1000;
+  if (
+    info.networkIdentifier !== facade.network.identifier ||
+    info.networkGenerationHashSeed !== seed ||
+    properties.network.generationHashSeed !== seed ||
+    properties.network.epochAdjustment !== `${epoch}s`
+  ) {
+    throw new Error('SDK と接続先の Testnet 設定が一致しません');
+  }
+}
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+if (!process.argv.includes('--announce'))
+  throw new Error('送信には --announce が必要です');
+
+console.log(await announce(readFileSync('payload.json', 'utf8')));
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/transactions/announce.py"
+import sys
+import os
+import requests
+from pathlib import Path
+from symbolchain.facade.SymbolFacade import SymbolFacade
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+# SDK とノードのネットワーク設定が一致することを確認する。
+def check_network():
+    info = request('/node/info')
+    properties = request('/network/properties')
+    seed = str(facade.network.generation_hash_seed)
+    epoch = int(facade.network.datetime_converter.epoch.timestamp())
+    if (
+        info['networkIdentifier'] != facade.network.identifier
+        or info['networkGenerationHashSeed'] != seed
+        or properties['network']['generationHashSeed'] != seed
+        or (properties['network']['epochAdjustment'] != f'{epoch}s')
+    ):
+        raise ValueError('SDK と接続先の Testnet 設定が一致しません')
+
+
+# ネットワーク設定を照合してから署名済みJSONを送信する。
+def announce(body, path='/transactions'):
+    check_network()
+    return request(path, 'PUT', body)
+
+
+if '--announce' not in sys.argv:
+    raise ValueError('送信には --announce が必要です')
+
+print(announce(Path('payload.json').read_text(encoding='utf8')))
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+node dist/transactions/announce.js --announce
+# または
+PYTHONPATH=src python src/transactions/announce.py --announce
+```
+
+## 3.3 取り込みと履歴を確認する
+
+転送の生成時に表示したハッシュを `TX_HASH` に設定します。
+`unconfirmed` は未承認、`confirmed` はブロック取り込み済みです。`failed` の場合は `code` を調べます。
+取り込み後のファイナライズは別に確認します。
+
+| 状態 | 分かること | 次に確認すること |
+| --- | --- | --- |
+| 未伝播・404 | 問い合わせたノードでまだ見つからない | ハッシュと接続先を確認し、時間を置いて再取得する |
+| `unconfirmed` | ノードが未承認として保持している | ブロックへの取り込みを待つ |
+| `failed` | ノードの検証で失敗した | `code` と金額・残高・手数料・期限などを照合する |
+| `confirmed` | ブロックに取り込まれた | `meta.height` と、必要ならファイナライズ高を確認する |
+
+`confirmed` の段階とファイナライズ後では、チェーン分岐に対する確実性が異なります。
+待機がタイムアウトしても失敗と断定せず、状態を確認してから再送を判断してください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/transactions/confirm.ts"
+import { alice } from '../accounts/key-store.js';
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+// 未伝播の404と失敗状態を区別し、ブロックへの取り込みを待つ。
+async function waitConfirmed(hash: string, seconds = 180) {
+  const until = Date.now() + seconds * 1000;
+  while (Date.now() < until) {
+    // 未伝播時の 404 はまだ失敗を意味しない。
+    const status = await request(`/transactionStatus/${hash}`).catch((error) => {
+      if (String(error).endsWith('HTTP 404')) return undefined;
+      throw error;
+    });
+    if (status?.group === 'failed') throw new Error(status.code);
+    if (status?.group === 'confirmed')
+      return request(`/transactions/confirmed/${hash}`);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error('取り込み待ちが期限を超えました。再送前に状態を確認してください');
+}
+
+const hash = process.env.TX_HASH;
+
+if (!hash) throw new Error('TX_HASH を設定してください');
+
+const confirmed = await waitConfirmed(hash);
+
+console.log(confirmed);
+
+const chain = await request('/chain/info');
+
+console.log(
+  'finalized:',
+  BigInt(confirmed.meta.height) <= BigInt(chain.latestFinalizedBlock.height),
+);
+
+const query = new URLSearchParams({
+  address: alice.address.toString(),
+  order: 'desc',
+  pageSize: '10',
+});
+
+console.log(await request(`/transactions/confirmed?${query}`));
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/transactions/confirm.py"
+import os
+import requests
+import time
+from urllib.parse import urlencode
+from accounts.key_store import alice
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+# 未伝播の404と失敗状態を区別し、ブロックへの取り込みを待つ。
+def wait_confirmed(tx_hash, seconds=180):
+    until = time.monotonic() + seconds
+    while time.monotonic() < until:
+        try:
+            status = request(f'/transactionStatus/{tx_hash}')
+        except requests.HTTPError as error:
+            if error.response.status_code != 404:
+                raise
+            status = {}
+        if status.get('group') == 'failed':
+            raise ValueError(status['code'])
+        if status.get('group') == 'confirmed':
+            return request(f'/transactions/confirmed/{tx_hash}')
+        time.sleep(2)
+    raise TimeoutError('取り込み待ちが期限を超えました。再送前に状態を確認してください')
+
+
+confirmed = wait_confirmed(os.environ['TX_HASH'])
+
+print(confirmed)
+
+chain = request('/chain/info')
+
+print(
+    'finalized:',
+    int(confirmed['meta']['height']) <= int(chain['latestFinalizedBlock']['height']),
+)
+
+query = urlencode({'address': str(alice.address), 'order': 'desc', 'pageSize': 10})
+
+print(request(f'/transactions/confirmed?{query}'))
+```
+
+</TabItem>
+</Tabs>
+
+履歴はページ分割されます。続きは `pageNumber` を増やして取得します。
+`latestFinalizedBlock.height` との比較は接続ノードの報告に基づく観測です。独立した証明検証は[検証](verify.mdx)で区別します。
+
+## 3.4 アグリゲートにまとめる
+
+アグリゲートは複数の処理を一つにまとめ、全体が成立する場合にまとめて適用します。
+内部トランザクションの一部だけを成功させることはできません。
+内部には個別の手数料・期限・署名を付けず、各処理の署名者の公開鍵を指定します。
+
+```mermaid
+flowchart LR
+    Alice["Alice の署名"] --> Aggregate["Aggregate Complete"]
+    Aggregate --> B["内部転送1: Alice → Bob"]
+    Aggregate --> C["内部転送2: Alice → Carol"]
+    B --> Result["両方を適用、または全体が不成立"]
+    C --> Result
+```
+Alice が署名する2件の転送なら、外側の Alice の署名だけで必要な署名を満たせます。
+内部トランザクションは `createEmbeddedTransactionFromTypedDescriptor`／`create_embedded_transaction_from_descriptor` で作成します。
+配列から `hashEmbeddedTransactions`／`hash_embedded_transactions` を計算し、外側の descriptor に設定します。
+追加の連署が必要な場合は、構築メソッドの第5引数に必要な連署の総数を指定します。
+SDK は1件につき104バイトを見込み、descriptor にすでに入っている連署と二重計上しないよう手数料を計算します。
+署名後に手数料・期限・内部トランザクションを書き換えた場合は、構築し直して署名を集め直してください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/transactions/aggregate-transfer.ts"
+import {
+  models,
+  SymbolFacade,
+  SymbolTransactionFactory,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice, bob, carol } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+// 内部トランザクションには個別の期限・手数料・署名を付けない。
+const transactions = [bob, carol].map((account) =>
+  facade.createEmbeddedTransactionFromTypedDescriptor(
+    new descriptors.TransferTransactionV1Descriptor(
+      account.address,
+      undefined,
+      new TextEncoder().encode('\0aggregate'),
+    ),
+    alice.publicKey,
+  ),
+);
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const tx = facade.createTransactionFromTypedDescriptor(
+  new descriptors.AggregateCompleteTransactionV3Descriptor(
+    SymbolFacade.hashEmbeddedTransactions(transactions),
+    transactions,
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+) as models.AggregateCompleteTransactionV3;
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(tx);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(tx, signature)) throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(tx, signature);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/transactions/aggregate_transfer.py"
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from accounts.key_store import alice, bob, carol
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+# 内部トランザクションには個別の期限・手数料・署名を付けない。
+transactions = [
+    facade.create_embedded_transaction_from_descriptor(
         {
             'type': 'transfer_transaction_v1',
-            'signer_public_key': alice_account.public_key,
-            'deadline': int(facade.now().add_hours(2).timestamp),  # 2時間後のネットワーク時刻（ミリ秒）
-            'recipient_address': bob_account.address,
-            'mosaics': mosaics,
-            'message': message,
-        }
+            'recipient_address': account.address,
+            'message': b'\x00aggregate',
+        },
+        alice.public_key,
     )
-    transfer_tx.fee = sc.Amount(transfer_tx.size * 100)  # 手数料設定(係数100)
+    for account in (bob, carol)
+]
 
-    print(json.dumps(transfer_tx.to_json(), indent=2, ensure_ascii=False))
-    ```
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'aggregate_complete_transaction_v3',
+        'transactions_hash': SymbolFacade.hash_embedded_transactions(transactions),
+        'transactions': transactions,
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
 
-  </TabItem>
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(tx)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(tx, signature)
+
+print(payload)
+```
+
+</TabItem>
 </Tabs>
 
-このように、転送トランザクションは必要な情報を指定することで、
-比較的シンプルなコードで作成できます。
-次は、このトランザクションに署名してネットワークへアナウンスしましょう。
+必要な署名がそろった `aggregate_complete_transaction_v3` を通常の `/transactions` に送ります。
+別の担当者の署名が必要な場合は[オフライン署名](offline-signature.mdx)、ネットワーク上で連署を集める場合は[ロック](lock.mdx)に進みます。
+接続先は aggregate v3 に対応している必要があります。SDK で生成できるトランザクションでも、接続先が未対応のバージョンは受理されません。
 
-## 5.4 署名とアナウンス
+## 3.5 SDK 3.3.3 の構築メソッドと手数料計算
 
-作成したトランザクションは、まだネットワークで有効ではありません。有効化するには以下の 2 つのステップが必要です：
+Python 3.3.3 では次の2メソッドが追加されました。TypeScript では既存の型付き descriptor 用メソッドを使い、両言語で構築の流れをそろえられます。
 
-### 5.4.1 署名
+| 用途 | TypeScript | Python 3.3.3で追加 |
+| --- | --- | --- |
+| 通常・外側トランザクションの構築 | `createTransactionFromTypedDescriptor` | `create_transaction_from_descriptor` |
+| 内部トランザクションの構築 | `createEmbeddedTransactionFromTypedDescriptor` | `create_embedded_transaction_from_descriptor` |
 
-署名は、送信者本人がトランザクションを承認したことを証明する重要な処理です。秘密鍵を使用して署名することで：
-
-- 対応する秘密鍵による承認を検証
-- トランザクションの改ざんを防止
-- 誰でも送信者と内容を検証可能
-
-<Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts
-    // アリス署名
-    const sig = aliceAccount.signTransaction(transferTx);
-    const payloadJsonString = SymbolTransactionFactory.attachSignature(transferTx, sig);
-
-    console.log('txHash:', facade.hashTransaction(transferTx).toString());
-    console.log('payload:', payloadJsonString);
-    console.log(transferTx.toJson());
-    ```
-
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py
-    # アリス署名
-    sig = alice_account.sign_transaction(transfer_tx)
-    payload_json_string = TransactionFactory.attach_signature(transfer_tx, sig)
-
-    print("txHash:", facade.hash_transaction(transfer_tx))
-    print("payload:", payload_json_string)
-    print(json.dumps(transfer_tx.to_json(), indent=2, ensure_ascii=False))
-    ```
-
-  </TabItem>
-</Tabs>
-
-## 5.5 送信と取り込み確認
-
-元原稿のアナウンス節と REST 節は未完成だったため、移行時に仮コードを省略しました。
-実行できる手順は [Symbol開発クイックスタート](../quickstart.md)、レスポンスの読み方は [REST APIの基本](../../references/rest-api.md) を参照してください。
-
-ファイナライズは REST のトランザクション `group` の値として返る状態ではありません。
-`confirmed` の取り込み高と、`/chain/info` の `latestFinalizedBlock.height` を比較する観測と、証明の独立検証は別です。
+TypeScript の3.3.3では、連署サイズにも手数料係数を掛けるよう手数料計算が修正されました。Python にも同じ修正が含まれます。
+`calculateTransactionFee`／`calculate_transaction_fee` は3.3.2で追加された関数で、3.3.3の修正版を利用できます。
+計算式は `(現在のサイズ + 追加する連署のサイズ) × 手数料係数` です。
+この関数の連署件数は**これから追加する件数**であり、Facade の構築メソッドへ渡す総数とは区別してください。
+構築時に設定した最大手数料を変更した場合は、署名も集め直します。
 
 ## 参照資料
 
-- [SDK 3.3.3 の SymbolFacade](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/facade/SymbolFacade.js)
+- [速習Symbolブロックチェーン：トランザクション](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/04_transaction.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
 - [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)
-
-掲載例は学習用アカウントを事前に用意する断片コードです。移行時にネットワークへの送信は実行していません。
+- [Python SDK 3.3.3 の変更履歴](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/python/CHANGELOG.md#333---31-aug-2026)
+- [TypeScript / JavaScript SDK 3.3.3 の変更履歴](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/CHANGELOG.md#333---31-aug-2026)

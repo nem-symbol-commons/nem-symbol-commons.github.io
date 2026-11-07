@@ -1,477 +1,352 @@
 ---
-title: Symbol SDK入門：アカウント
-description: 秘密鍵、公開鍵、アドレス、ニーモニックとアカウント生成。
+title: アカウント
+description: アカウント生成、秘密鍵の復元、ニーモニックによる導出、公開アカウントと残高確認。
 slug: /symbol/sdk/accounts
-sidebar_position: 3
+sidebar_position: 2
 tags:
 - SymbolSDK
-- Account
 ---
 
-import Tabs from "@theme/Tabs";
-import TabItem from "@theme/TabItem";
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
-:::note[移行記事]
+アカウントは秘密鍵で署名し、公開鍵とアドレスで識別します。
+秘密鍵から公開鍵、公開鍵からアドレスを計算できますが、アドレスから秘密鍵は復元できません。
+[環境構築](environment.mdx)で用意したプロジェクトで実行します。
 
-2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
-移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
-対象バージョンや検証状況を本文で確認してください。
+## 2.1 アカウントを生成する
 
-:::
-
-この連載は既存原稿の学習資料です。最短で試す場合は [Symbol開発クイックスタート](../quickstart.md) を参照してください。
-
-アカウントは、ブロックチェーン上で資産や権利を管理するための基本単位です。
-Symbol では、アカウントは「秘密鍵」と「公開鍵」のペアで構成されています。
-
-- 秘密鍵：アカウントの所有を証明する重要な情報です。他人に絶対に知られないようにしましょう。
-- 公開鍵：秘密鍵から生成され、ネットワーク上でアカウントを識別するために使います。
-- アドレス：公開鍵から作られる短い文字列で、送金や受け取りの際に利用します。
-
-アカウントがあれば、Symbol ネットワークでトランザクションの送信や、モザイクの受け取りができます。
-
-秘密鍵・ニーモニックのログ出力は移行時に削除しました。コード例中の `<自分のTestnet専用秘密鍵>` は説明用の伏せ字で、そのままでは実行できません。
-既存鍵の例には、自分だけが管理する Testnet 用の値を手元で設定してください。生成した秘密情報はログや Git に残さず、保存方法の例は [クイックスタート](../quickstart.md) を参照してください。
-
-## 3.1 アカウント作成
-
-### 3.1.1 秘密鍵から生成
-
-アカウントを作成する基本的な方法は、ランダムな秘密鍵を生成することです。
-秘密鍵はアカウントの所有を証明する大切な情報で、ここから公開鍵とアドレスが作られます。
-以下は、SDK を使って秘密鍵を生成し、新しいアカウントを作成する方法です。
+暗号学的にランダムな秘密鍵から新しいアカウントを作ります。
+秘密鍵は保存せず、公開鍵とアドレスを表示します。再実行すると別のアカウントになります。
 
 <Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts title="src/3_1_1_privatekey.ts"
-    import { PrivateKey } from 'symbol-sdk';
-    import { SymbolFacade } from 'symbol-sdk/symbol';
+<TabItem value="ts" label="TypeScript">
 
-    // ランダムな秘密鍵生成
-    const privateKey = PrivateKey.random();
+```ts title="src/accounts/create-account.ts"
+import { PrivateKey } from 'symbol-sdk';
+import { SymbolFacade } from 'symbol-sdk/symbol';
 
-    // 秘密鍵からアカウント生成
-    const facade = new SymbolFacade('testnet');
-    const account = facade.createAccount(privateKey);
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
 
-    console.log('publicKey :', account.publicKey.toString());
-    console.log('address   :', account.address.toString());
-    ```
+const account = facade.createAccount(PrivateKey.random());
 
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py title="src/3_1_1_privatekey.py"
-    from symbolchain.CryptoTypes import PrivateKey
-    from symbolchain.facade.SymbolFacade import SymbolFacade
+console.log('publicKey:', account.publicKey.toString());
 
-    # ランダムな秘密鍵生成
-    privateKey = PrivateKey.random()
-
-    # 秘密鍵からアカウント生成
-    facade = SymbolFacade('testnet')
-    account = facade.create_account(privateKey)
-
-    print(f'publicKey : {account.public_key}')
-    print(f'address   : {account.address}')
-    ```
-
-  </TabItem>
-  <TabItem value="dart" label="Dart">
-    ```dart title="src/c3_1_1_privatekey.dart"
-    import 'package:symbol_sdk/facade/SymbolFacade.dart';
-    import 'package:symbol_sdk/symbol/KeyPair.dart';
-    import 'package:symbol_sdk/symbol/Network.dart';
-    import 'package:symbol_sdk/CryptoTypes.dart';
-    import 'package:symbol_sdk/utils/converter.dart';
-
-    void main() {
-      // ランダムな秘密鍵生成
-      final privateKey = PrivateKey.random();
-
-      // 秘密鍵からアカウント生成
-      final facade = SymbolFacade(Network.TESTNET);
-      final keyPair = KeyPair(privateKey);
-      final address = facade.network.publicKeyToAddress(keyPair.publicKey);
-
-      print('publicKey: ${keyPair.publicKey.toString()}');
-      print('address: ${addressToString(address)}');
-    }
-    ```
-
-  </TabItem>
-</Tabs>
-
-#### 実行例
-
-```plaintext
-publicKey : 372B5E1C47C10A8035367D5BF7804176790FBF5BC58F53F159FDA9EDA464965A
-address   : TDTXOJZ56VWY4777JF3NQX3BJSYPCVXBUPPVP6Q
+console.log('address:', account.address.toString());
 ```
 
-### 3.1.2 既存の秘密鍵から生成
+</TabItem>
+<TabItem value="py" label="Python">
 
-既存の秘密鍵を使ってアカウントを作成することもできます。
-以下は、秘密鍵からアカウントを作成する方法です。
+```py title="src/accounts/create_account.py"
+from symbolchain.CryptoTypes import PrivateKey
+from symbolchain.facade.SymbolFacade import SymbolFacade
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+account = facade.create_account(PrivateKey.random())
+
+print('publicKey:', account.public_key)
+
+print('address:', account.address)
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+# TypeScript
+npx tsc
+node dist/accounts/create-account.js
+# Python
+PYTHONPATH=src python src/accounts/create_account.py
+```
+
+ネットワークへの登録要求は不要です。アドレスはローカルで生成できます。
+入金などによって状態が作られるまでは、REST のアカウント検索が404になる場合があります。
+
+## 2.2 既存の秘密鍵を読み込む
+
+自分が管理する Testnet 専用の秘密鍵がある場合は、プロジェクトルートの `.testnet-private-key` から読み込みます。
+ファイルには64桁の16進数だけを保存し、ファイル権限を制限して `.gitignore` に追加します。
+秘密鍵をコード中の文字列やログに残しません。新規に学習する場合は次節のニーモニック方式を使ってください。
 
 <Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts title="src/3_1_2_existingPrivatekey.ts"
-    import { PrivateKey } from "symbol-sdk";
-    import { SymbolFacade } from "symbol-sdk/symbol";
+<TabItem value="ts" label="TypeScript">
 
-    // 既存の秘密鍵
-    const privateKey = new PrivateKey(
-      "<自分のTestnet専用秘密鍵>"
-    );
+```ts title="src/accounts/restore-account.ts"
+import { readFileSync } from 'node:fs';
+import { PrivateKey } from 'symbol-sdk';
+import { SymbolFacade } from 'symbol-sdk/symbol';
 
-    // 秘密鍵からアカウント生成
-    const facade = new SymbolFacade("testnet");
-    const account = facade.createAccount(privateKey);
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
 
-    console.log("publicKey :", account.publicKey.toString());
-    console.log("address   :", account.address.toString());
-    ```
+// 保存済みの Testnet 専用秘密鍵を読み込む。
+const privateKey = new PrivateKey(readFileSync('.testnet-private-key', 'utf8').trim());
 
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py title="src/3_1_2_existingPrivatekey.py"
-    from symbolchain.CryptoTypes import PrivateKey
-    from symbolchain.facade.SymbolFacade import SymbolFacade
+const account = facade.createAccount(privateKey);
 
-    # 既存の秘密鍵
-    privateKey = PrivateKey(
-        "<自分のTestnet専用秘密鍵>"
+console.log(account.address.toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/restore_account.py"
+from pathlib import Path
+from symbolchain.CryptoTypes import PrivateKey
+from symbolchain.facade.SymbolFacade import SymbolFacade
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+# 秘密鍵を使ってアカウントを復元する。ログには出力しない。
+private_key = PrivateKey(
+    Path('.testnet-private-key').read_text(encoding='utf8').strip()
+)
+
+account = facade.create_account(private_key)
+
+print(account.address)
+```
+
+</TabItem>
+</Tabs>
+
+秘密鍵ファイルも暗号化されていません。実資産を持つ Mainnet アカウントを入力しないでください。
+
+## 2.3 ニーモニックから派生させる
+
+ニーモニックから複数の鍵を導出します。SDK の `bip32Path`／`bip32_path` でネットワークに対応する導出パスを選びます。
+実行するたびに新しいニーモニックを生成します。同じアカウントを使い続けるには、[学習用アカウントの準備](learning-accounts.mdx)でニーモニックを保存してください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/derive-accounts.ts"
+import { Bip32 } from 'symbol-sdk';
+import { SymbolFacade } from 'symbol-sdk/symbol';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const bip32 = new Bip32();
+
+// 複数のアカウントを導出するためのニーモニックを生成する。
+const mnemonic = bip32.random();
+
+const root = bip32.fromMnemonic(mnemonic, '');
+
+for (let index = 0; index < 3; index++) {
+  const child = root.derivePath(facade.bip32Path(index));
+  const pair = SymbolFacade.bip32NodeToKeyPair(child);
+  console.log(index, facade.createAccount(pair.privateKey).address.toString());
+}
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/derive_accounts.py"
+from symbolchain.Bip32 import Bip32
+from symbolchain.facade.SymbolFacade import SymbolFacade
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+bip32 = Bip32()
+
+# 保存したニーモニックを使うと、同じアカウントを復元できる。
+mnemonic = bip32.random()
+
+root = bip32.from_mnemonic(mnemonic, '')
+
+for index in range(3):
+    child = root.derive_path(facade.bip32_path(index))
+    pair = SymbolFacade.bip32_node_to_key_pair(child)
+    print(index, facade.create_account(pair.private_key).address)
+```
+
+</TabItem>
+</Tabs>
+
+同じニーモニックでも、パスフレーズ・導出パス・インデックスが異なると別の鍵になります。
+パスフレーズを設定した場合は、復元にもその値が必要です。
+`Bip32` の既定の単語リストは英語です。`Bip32('ed25519', 'japanese')` を指定すると日本語に変わります。
+ウォレットに読み込む場合は単語リストと導出パスの対応を確認してください。
+
+## 2.4 公開鍵とアドレスを扱う
+
+公開アカウントは署名用の秘密鍵を持ちません。相手の公開鍵からアドレスを計算したり、受信者アドレスを検査したりするときに使います。
+次の公開鍵は例示用で、宛先への送金には使いません。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/public-account.ts"
+import { PublicKey } from 'symbol-sdk';
+import { Address, SymbolFacade } from 'symbol-sdk/symbol';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const account = facade.createPublicAccount(
+  new PublicKey('43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9'),
+);
+
+const address = new Address(account.address.toString());
+
+console.log(address.toString());
+
+console.log(
+  'valid Testnet address:',
+  facade.network.isValidAddressString(address.toString()),
+);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/public_account.py"
+from symbolchain.CryptoTypes import PublicKey
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from symbolchain.symbol.Network import Address
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+account = facade.create_public_account(
+    PublicKey('43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9')
+)
+
+address = Address(str(account.address))
+
+print(address)
+
+print('valid Testnet address:', facade.network.is_valid_address_string(str(address)))
+```
+
+</TabItem>
+</Tabs>
+
+アドレスの形式が正しくても、残高があることや相手がその秘密鍵を持つことは証明しません。
+
+## 2.5 残高を確認する
+
+[学習用アカウントの準備](learning-accounts.mdx)でアカウントを作り、Faucet から Alice に入金します。
+`SYMBOL_NODE` に Testnet ノードの HTTPS REST URL を設定します。
+
+```bash
+export SYMBOL_NODE='https://401-sai-dual.symboltest.net:3001'
+```
+
+接続先が使えない場合は [Testnet ノード一覧](https://symbolnodes.org/nodes_testnet/)から選び直してください。
+ノードのネットワーク識別子・generation hash seed・epoch を SDK の Testnet 設定と照合してから、残高を取得します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/account-info.ts"
+import { SymbolFacade } from 'symbol-sdk/symbol';
+import { alice } from './key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+// SDK とノードのネットワーク設定が一致することを確認する。
+async function checkNetwork() {
+  const info = await request('/node/info');
+  const properties = await request('/network/properties');
+  const seed = facade.network.generationHashSeed.toString();
+  const epoch = facade.network.datetimeConverter.epoch.getTime() / 1000;
+  if (
+    info.networkIdentifier !== facade.network.identifier ||
+    info.networkGenerationHashSeed !== seed ||
+    properties.network.generationHashSeed !== seed ||
+    properties.network.epochAdjustment !== `${epoch}s`
+  ) {
+    throw new Error('SDK と接続先の Testnet 設定が一致しません');
+  }
+}
+
+await checkNetwork();
+
+console.log(await request(`/accounts/${alice.address}`));
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/account_info.py"
+import os
+import requests
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
     )
+    response.raise_for_status()
+    return response.json()
 
-    # 秘密鍵からアカウント生成
-    facade = SymbolFacade('testnet')
-    account = facade.create_account(privateKey)
 
-    print(f'publicKey : {account.public_key}')
-    print(f'address   : {account.address}')
-    ```
+# SDK とノードのネットワーク設定が一致することを確認する。
+def check_network():
+    info = request('/node/info')
+    properties = request('/network/properties')
+    seed = str(facade.network.generation_hash_seed)
+    epoch = int(facade.network.datetime_converter.epoch.timestamp())
+    if (
+        info['networkIdentifier'] != facade.network.identifier
+        or info['networkGenerationHashSeed'] != seed
+        or properties['network']['generationHashSeed'] != seed
+        or (properties['network']['epochAdjustment'] != f'{epoch}s')
+    ):
+        raise ValueError('SDK と接続先の Testnet 設定が一致しません')
 
-  </TabItem>
-  <TabItem value="dart" label="Dart">
-    ```dart title="src/c3_1_1_privatekey.dart"
-    import 'package:symbol_sdk/facade/SymbolFacade.dart';
-    import 'package:symbol_sdk/symbol/KeyPair.dart';
-    import 'package:symbol_sdk/symbol/Network.dart';
-    import 'package:symbol_sdk/CryptoTypes.dart';
-    import 'package:symbol_sdk/utils/converter.dart';
 
-    void main() {
-      // 既存の秘密鍵
-      final privateKey = PrivateKey(
-        "<自分のTestnet専用秘密鍵>",
-      );
+check_network()
 
-      // 秘密鍵からアカウント生成
-      final facade = SymbolFacade(Network.TESTNET);
-      final keyPair = KeyPair(privateKey);
-      final address = facade.network.publicKeyToAddress(keyPair.publicKey);
-
-      print('publicKey: ${keyPair.publicKey.toString()}');
-      print('address: ${addressToString(address)}');
-    }
-    ```
-
-  </TabItem>
-</Tabs>
-
-#### 実行例
-
-```plaintext
-publicKey : 372B5E1C47C10A8035367D5BF7804176790FBF5BC58F53F159FDA9EDA464965A
-address   : TDTXOJZ56VWY4777JF3NQX3BJSYPCVXBUPPVP6Q
+print(request(f'/accounts/{alice.address}'))
 ```
 
-### 3.1.3 ニーモニックから生成
-
-もう一つの方法は、ニーモニック（単語の並び）からアカウントを作成することです。
-ニーモニックがあれば、アカウントを失っても復元できます。
-以下は、ニーモニックから秘密鍵・公開鍵・アドレスを生成してアカウントを作成する方法です。
-
-<Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts title="src/3_1_3_mnemonic.ts"
-    import { Bip32 } from 'symbol-sdk';
-    import { SymbolFacade } from 'symbol-sdk/symbol';
-
-    // ニーモニック生成
-    const bip32 = new Bip32();
-    const mnemonic = bip32.random();
-
-    // ニーモニックからアカウント生成
-    const facade = new SymbolFacade('testnet');
-    const password = '';
-    const bip32Node = bip32.fromMnemonic(mnemonic, password);
-
-    const maxAccounts = 3;
-    for (let i = 0; i < maxAccounts; i++) {
-      const bip32Path = facade.bip32Path(i);
-      const childBip32Node = bip32Node.derivePath(bip32Path);
-      const keypair = SymbolFacade.bip32NodeToKeyPair(childBip32Node);
-      const account = facade.createAccount(keypair.privateKey);
-      console.log(`publicKey : ${account.publicKey}`);
-      console.log(`address   : ${account.address}`);
-      console.log('===');
-    }
-    ```
-
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py title="src/3_1_3_mnemonic.py"
-    from symbolchain.Bip32 import Bip32
-    from symbolchain.facade.SymbolFacade import SymbolFacade
-
-    # ニーモニック生成
-    bip32 = Bip32()
-    mnemonic = bip32.random()
-
-    # ニーモニックからアカウント生成
-    facade = SymbolFacade("testnet")
-    password = ""
-    bip32Node = bip32.from_mnemonic(mnemonic, password)
-
-    max_accounts = 3
-    for i in range(max_accounts):
-        bip32_path = facade.bip32_path(i)
-        child_bip32_node = bip32Node.derive_path(bip32_path)
-        key_pair = SymbolFacade.bip32_node_to_key_pair(child_bip32_node)
-        account = facade.create_account(key_pair.private_key)
-        print(f"publicKey : {account.public_key}")
-        print(f"address   : {account.address}")
-        print('===')
-    ```
-
-  </TabItem>
-  <TabItem value="dart" label="Dart">
-    ```dart title="src/c3_1_1_privatekey.dart"
-    import 'package:symbol_sdk/Bip32.dart';
-    import 'package:symbol_sdk/facade/SymbolFacade.dart';
-    import 'package:symbol_sdk/symbol/Network.dart';
-    import 'package:symbol_sdk/utils/converter.dart';
-
-    void main() {
-      // ニーモニック生成
-      final bip32 = Bip32();
-      final mnemonic = bip32.random();
-
-      // ニーモニックからアカウント生成
-      final facade = SymbolFacade(Network.TESTNET);
-      final password = '';
-      final bip32Node = bip32.fromMnemonic(mnemonic, password);
-
-      final maxAccounts = 3;
-      for (var i = 0; i < maxAccounts; i++) {
-        final bip32Path = facade.bip32Path(i);
-        final childBip32Node = bip32Node.derivePath(bip32Path);
-        final keyPair = SymbolFacade.bip32NodeToKeyPair(childBip32Node);
-        final address = facade.network.publicKeyToAddress(keyPair.publicKey);
-        print('publicKey : ${keyPair.publicKey}');
-        print('address   : ${addressToString(address)}');
-        print('===');
-      }
-    }
-    ```
-
-  </TabItem>
+</TabItem>
 </Tabs>
 
-#### 実行例
-
-```plaintext
-===
-publicKey : 43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9
-address   : TCU2H6EQTY6IR5JZAY6PYKFIWIGGY5SZZMUBEGQ
-===
-publicKey : 1F3D9AC4169C9E8B6132AF09A344965CEE0EDEC58CEF96B1D407B0F169655379
-address   : TAGXSJZEGEOFRR7ZI6Q2IERQEQLPAM25F4OLHOQ
-===
-publicKey : CCCA6B17906BD0EB3E30C0D046102350EAF689AF443F019380F53576923CAC74
-address   : TDWVMPSZNTC76GUBA3CTMUPFIWA5BCBJN6FS3WQ
-```
-
-## 3.2 公開アカウント
-
-公開鍵だけが分かっている場合でも、公開鍵からアカウントを作成できます。
-この方法は、相手のアカウントを扱いたいときや、受信専用のアカウント情報を作りたいときに便利です。
-以下は、公開鍵からアカウントを作成し、アドレスを確認する方法です。
-
-<Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts title="src/3_2_publicAccount.ts"
-    import { PublicKey } from 'symbol-sdk';
-    import { SymbolFacade } from 'symbol-sdk/symbol';
-
-    // 公開鍵
-    const publicKey = new PublicKey(
-      '43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9'
-    );
-
-    // 公開鍵から公開アカウント生成
-    const facade = new SymbolFacade('testnet');
-    const account = facade.createPublicAccount(publicKey);
-
-    console.log('publicKey :', account.publicKey.toString());
-    console.log('address   :', account.address.toString());
-    ```
-
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py title="src/3_2_publicAccount.py"
-    from symbolchain.CryptoTypes import PublicKey
-    from symbolchain.facade.SymbolFacade import SymbolFacade
-
-    # 公開鍵
-    publicKey = PublicKey(
-        "43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9"
-    )
-
-    # 公開鍵からアカウント生成
-    facade = SymbolFacade('testnet')
-    account = facade.create_public_account(publicKey)
-
-    print(f'publicKey : {account.public_key}')
-    print(f'address   : {account.address}')
-    ```
-
-  </TabItem>
-  <TabItem value="dart" label="Dart">
-    ```dart title="src/c3_1_1_privatekey.dart"
-    import 'package:symbol_sdk/CryptoTypes.dart';
-    import 'package:symbol_sdk/facade/SymbolFacade.dart';
-    import 'package:symbol_sdk/symbol/Network.dart';
-    import 'package:symbol_sdk/utils/converter.dart';
-
-    void main() {
-      // 公開鍵
-      final publicKey = PublicKey(
-        '43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9',
-      );
-
-      // 公開鍵から公開アカウント生成
-      final facade = SymbolFacade(Network.TESTNET);
-      final address = facade.network.publicKeyToAddress(publicKey);
-
-      print('publicKey: ${publicKey.toString()}');
-      print('address: ${addressToString(address)}');
-    }
-    ```
-
-  </TabItem>
-</Tabs>
-
-#### 実行例
-
-```plaintext
-publicKey : 43F7D852263AB7808C9234EEF496E944B5CF19FB91BE6F6881E1CEFDB0D664E9
-address   : TCU2H6EQTY6IR5JZAY6PYKFIWIGGY5SZZMUBEGQ
-```
-
-## 3.3 アドレス
-
-アドレス文字列は、公開鍵や秘密鍵がなくてもオブジェクトとして扱えます。ただし、残高などの現在の状態を取得するには別途 REST API が必要です。
-この方法は、相手のアドレスだけ知っている場合などに便利です。
-以下は、アドレス文字列からアドレスオブジェクトを作成する方法です。
-
-<Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts title="src/3_3_address.ts"
-    import { SymbolFacade } from 'symbol-sdk/symbol';
-
-    const address = new SymbolFacade.Address(
-      'TCU2H6EQTY6IR5JZAY6PYKFIWIGGY5SZZMUBEGQ'
-    );
-
-    console.log('address   :', address.toString());
-    ```
-
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py title="src/3_3_address.py"
-    from symbolchain.facade.SymbolFacade import SymbolFacade
-
-    address = SymbolFacade.Address('TCU2H6EQTY6IR5JZAY6PYKFIWIGGY5SZZMUBEGQ')
-
-    print(f'address   : {address}')
-    ```
-
-  </TabItem>
-  <TabItem value="dart" label="Dart">
-    ```dart
-    // なし
-    ```
-
-  </TabItem>
-</Tabs>
-
-#### 実行例
-
-```plaintext
-address   : TCU2H6EQTY6IR5JZAY6PYKFIWIGGY5SZZMUBEGQ
-```
-
-## 補足資料 1. 日本語ニーモニック
-
-`Bip32` クラスのコンストラクタに 'japanese' を指定すると、日本語のニーモニックを生成できます。
-ウォレット側の言語・導出パスの対応は別途確認してください。この連載の学習例は 'english' を使います。
-
-<Tabs groupId="language">
-  <TabItem value="ts" label="TypeScript">
-    ```ts title="src/3_s_1_japaneseMnemonic.ts"
-    import { Bip32 } from 'symbol-sdk';
-
-    // 日本語ニーモニック生成
-    const bip32 = new Bip32('ed25519', 'japanese');
-    const mnemonic = bip32.random();
-
-    ```
-
-  </TabItem>
-  <TabItem value="py" label="Python">
-    ```py title="src/3_s_1_japaneseMnemonic.py"
-    from symbolchain.Bip32 import Bip32
-
-    # 日本語ニーモニック生成
-    bip32 = Bip32('ed25519', 'japanese')
-    mnemonic = bip32.random()
-
-    ```
-
-  </TabItem>
-  <TabItem value="dart" label="Dart">
-    ```dart title="src/c3_s_1_japanese_mnemonic.dart"
-    import 'package:symbol_sdk/Bip32.dart';
-    import 'package:bip39_mnemonic/bip39_mnemonic.dart' as bip39;
-
-    void main() {
-      // 日本語ニーモニック生成
-      // bip39_mnemonic パッケージのインストールが必要です。
-      final bip32 = Bip32('ed25519', bip39.Language.japanese);
-      final mnemonic = bip32.random();
-
-    }
-    ```
-
-  </TabItem>
-</Tabs>
-
-#### 実行例
-
-```plaintext
-```
-
-## 補足資料 2. ニーモニックのパスワード
-
-ニーモニックから秘密鍵を生成するときに、パスワードを指定することができます。
-パスワードを指定すると、ニーモニックだけでは秘密鍵を復元できなくなり、セキュリティが向上します。
-パスワードは任意の文字列を指定できますが、忘れないように注意しましょう。
+`account.mosaics` の `id` は16進数、`amount` は最小単位を表す10進数の文字列です。
+XYM の可分性は6なので、`1000000` が1 XYMです。他のモザイクではそのモザイクの可分性を使います。
 
 ## 参照資料
 
-- [Symbol SDK のアカウント・署名実装](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/facade/SymbolFacade.js)
-- [SDK の BIP32 実装](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/Bip32.js)
-
-TypeScript の生成・導出処理は SDK 3.3.3 で照合しています。Python / Dart の掲載例は移行時点では未実行です。
+- [速習Symbolブロックチェーン：アカウント](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/03_account.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)

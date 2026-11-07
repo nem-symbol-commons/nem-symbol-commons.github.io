@@ -1,0 +1,490 @@
+---
+title: ネームスペース
+description: ネームスペースのレンタル、エイリアス、名前解決とレシート。
+slug: /symbol/sdk/namespace
+sidebar_position: 5
+tags:
+- SymbolSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+ネームスペースはアドレスやモザイクに名前を付ける仕組みです。登録にはトランザクション手数料に加えてレンタル料がかかります。
+`NAMESPACE_NAME` に未使用のルート名を設定します。`sdk-your-unique-name` を自分用の名前に置き換えてください。
+名前は小文字英数字・`-`・`_` が使え、先頭文字や長さの制約があります。SDK の `isValidNamespaceName` で形式を確認できます。
+
+```bash
+export NAMESPACE_NAME='sdk-your-unique-name'
+```
+
+## 5.1 レンタル料を確認して登録する
+
+`GET /network/fees/rental` の `effectiveRootNamespaceRentalFeePerBlock` と期間の積がルートのレンタル料です。
+`effectiveChildNamespaceRentalFee` は子のレンタル料です。登録期間の上下限は `/network/properties` の namespace プラグイン設定を確認します。
+レンタル料を確認し、`NAMESPACE_DURATION` に登録期間をブロック数で設定します。
+たとえば最小期間30日・目標生成間隔30秒のネットワークでは、30日分は86,400ブロックです。
+設定値が `30d` や `2d` のような時間表記の場合は、`chain.blockGenerationTargetTime` を使ってブロック数へ換算します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/namespace/register-namespace.ts"
+import {
+  isValidNamespaceName,
+  models,
+  SymbolTransactionFactory,
+  SymbolFacade,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const node = process.env.SYMBOL_NODE?.replace(/\/$/, '');
+
+// HTTPエラーを検出し、応答待ちを15秒に制限する。
+async function request(path: string, method = 'GET', body?: string) {
+  if (!node) throw new Error('SYMBOL_NODE に Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    method,
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+const name = process.env.NAMESPACE_NAME;
+
+if (!name || !isValidNamespaceName(name))
+  throw new Error('有効な NAMESPACE_NAME が必要です');
+
+if (!process.env.NAMESPACE_DURATION) throw new Error('NAMESPACE_DURATION が必要です');
+
+const duration = BigInt(process.env.NAMESPACE_DURATION);
+
+if (duration <= 0n) throw new Error('期間は正のブロック数で指定してください');
+
+const rental = await request('/network/fees/rental');
+
+console.log(
+  'rentalFee:',
+  (BigInt(rental.effectiveRootNamespaceRentalFeePerBlock) * duration).toString(),
+);
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const transaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.NamespaceRegistrationTransactionV1Descriptor(
+    new models.NamespaceId(0n),
+    models.NamespaceRegistrationType.ROOT,
+    new models.BlockDuration(duration),
+    undefined,
+    new TextEncoder().encode(name),
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+);
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(transaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(transaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(transaction, signature);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/namespace/register_namespace.py"
+import os
+import requests
+from symbolchain.symbol.IdGenerator import is_valid_namespace_name
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+
+# HTTPエラーを検出し、応答待ちを15秒に制限する。
+def request(path, method='GET', body=None):
+    node = os.environ['SYMBOL_NODE'].rstrip('/')
+    response = requests.request(
+        method,
+        node + path,
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+name = os.environ['NAMESPACE_NAME']
+
+if not is_valid_namespace_name(name):
+    raise ValueError('有効な NAMESPACE_NAME が必要です')
+
+duration = int(os.environ['NAMESPACE_DURATION'])
+
+if duration <= 0:
+    raise ValueError('期間は正のブロック数で指定してください')
+
+rental = request('/network/fees/rental')
+
+print('rentalFee:', int(rental['effectiveRootNamespaceRentalFeePerBlock']) * duration)
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+transaction = facade.create_transaction_from_descriptor(
+    {
+        'type': 'namespace_registration_transaction_v1',
+        'registration_type': 'root',
+        'duration': duration,
+        'name': name.encode('utf8'),
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(transaction)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(transaction, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(transaction, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+`NamespaceRegistrationTransactionV1Descriptor` のIDには仮の `0n` を渡します。SDK は名前と親IDから正規のIDを計算します。
+
+子を登録する場合は `registrationType: 'child'`／`registration_type: 'child'` と
+`parentId`／`parent_id` を指定し、`name` には子の部分だけを渡します。期間は親から引き継ぎます。
+送信後はIDを16桁の16進数にして `GET /namespaces/{namespaceId}` で `endHeight` を確認します。
+期限の実時刻はブロック生成間隔で変動するため、概算と区別してください。
+
+## 5.2 アドレスをリンクして名前で送る
+
+ルートの取り込み後、所有者 Alice が Bob のアドレスをリンクします。
+エイリアスの変更では、既存リンクの `unlink` を取り込んでから新しい `link` を登録します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/namespace/link-address.ts"
+import {
+  generateNamespaceId,
+  models,
+  SymbolTransactionFactory,
+  SymbolFacade,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice, bob } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const name = process.env.NAMESPACE_NAME;
+
+if (!name) throw new Error('NAMESPACE_NAME が必要です');
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const transaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.AddressAliasTransactionV1Descriptor(
+    new models.NamespaceId(generateNamespaceId(name)),
+    bob.address,
+    models.AliasAction.LINK,
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+);
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(transaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(transaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(transaction, signature);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/namespace/link_address.py"
+import os
+from symbolchain.symbol.IdGenerator import generate_namespace_id
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice, bob
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+transaction = facade.create_transaction_from_descriptor(
+    {
+        'type': 'address_alias_transaction_v1',
+        'namespace_id': generate_namespace_id(os.environ['NAMESPACE_NAME']),
+        'address': bob.address,
+        'alias_action': 'link',
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(transaction)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(transaction, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(transaction, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/namespace/transfer-to-alias.ts"
+import {
+  Address,
+  generateNamespaceId,
+  models,
+  SymbolTransactionFactory,
+  SymbolFacade,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const name = process.env.NAMESPACE_NAME;
+
+if (!name) throw new Error('NAMESPACE_NAME が必要です');
+
+const recipient = Address.fromNamespaceId(
+  new models.NamespaceId(generateNamespaceId(name)),
+  facade.network.identifier,
+);
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const transaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.TransferTransactionV1Descriptor(
+    recipient,
+    undefined,
+    new TextEncoder().encode('\0name resolved at execution'),
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+);
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(transaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(transaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(transaction, signature);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/namespace/transfer_to_alias.py"
+import os
+from symbolchain import sc
+from symbolchain.symbol.Network import Address
+from symbolchain.symbol.IdGenerator import generate_namespace_id
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+recipient = Address.from_namespace_id(
+    sc.NamespaceId(generate_namespace_id(os.environ['NAMESPACE_NAME'])),
+    facade.network.identifier,
+)
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+transaction = facade.create_transaction_from_descriptor(
+    {
+        'type': 'transfer_transaction_v1',
+        'recipient_address': recipient,
+        'message': b'\x00name resolved at execution',
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(transaction)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(transaction, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(transaction, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+名前はトランザクションの実行時に解決されます。署名時のリンク先が将来も同じとは限りません。
+宛先を固定したい場合は通常のアドレスを指定します。
+
+## 5.3 モザイクをリンクする
+
+別の名前を登録してから `mosaic_alias_transaction_v1` を作成します。
+アドレスとモザイクを同じ名前へ同時にリンクすることはできません。名前とモザイクの所有者が一致している必要があります。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/namespace/link-mosaic.ts"
+import {
+  generateNamespaceId,
+  models,
+  SymbolTransactionFactory,
+  SymbolFacade,
+  descriptors,
+} from 'symbol-sdk/symbol';
+import { alice } from '../accounts/key-store.js';
+
+// Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+const facade = new SymbolFacade('testnet');
+
+const name = process.env.NAMESPACE_NAME;
+
+const id = process.env.MOSAIC_ID;
+
+if (!name || !id) throw new Error('NAMESPACE_NAME と MOSAIC_ID が必要です');
+
+// descriptor に署名者・手数料係数・期限を設定して構築する。
+const transaction = facade.createTransactionFromTypedDescriptor(
+  new descriptors.MosaicAliasTransactionV1Descriptor(
+    new models.NamespaceId(generateNamespaceId(name)),
+    new models.MosaicId(BigInt(`0x${id}`)),
+    models.AliasAction.LINK,
+  ),
+  alice.publicKey,
+  100,
+  2 * 60 * 60,
+);
+
+// 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+const signature = alice.signTransaction(transaction);
+
+// 署名やハッシュが一致しなければ処理を止める。
+if (!facade.verifyTransaction(transaction, signature))
+  throw new Error('署名検証に失敗しました');
+
+// 署名を組み込み、REST APIへ送れるJSONにする。
+const payload = SymbolTransactionFactory.attachSignature(transaction, signature);
+
+console.log(payload);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/namespace/link_mosaic.py"
+import os
+from symbolchain.symbol.IdGenerator import generate_namespace_id
+from symbolchain.symbol.TransactionFactory import TransactionFactory
+from symbolchain.facade.SymbolFacade import SymbolFacade
+from accounts.key_store import alice
+
+# Testnet のアドレス生成・時刻・署名に使う設定を選ぶ。
+facade = SymbolFacade('testnet')
+
+# descriptor に署名者・手数料係数・期限を設定して構築する。
+transaction = facade.create_transaction_from_descriptor(
+    {
+        'type': 'mosaic_alias_transaction_v1',
+        'namespace_id': generate_namespace_id(os.environ['NAMESPACE_NAME']),
+        'mosaic_id': int(os.environ['MOSAIC_ID'], 16),
+        'alias_action': 'link',
+    },
+    alice.public_key,
+    100,
+    2 * 60 * 60,
+)
+
+# 内容を確定したトランザクションに、送信者の秘密鍵で署名する。
+signature = alice.sign_transaction(transaction)
+
+# 署名やハッシュが一致しなければ処理を止める。
+if not facade.verify_transaction(transaction, signature):
+    raise ValueError('署名検証に失敗しました')
+
+# 署名を組み込み、REST APIへ送れるJSONにする。
+payload = TransactionFactory.attach_signature(transaction, signature)
+
+print(payload)
+```
+
+</TabItem>
+</Tabs>
+
+モザイクの転送では `generateMosaicAliasId(name)`／`generate_mosaic_alias_id(name)` を未解決モザイクIDとして指定します。
+子を含む名前のIDには `generateNamespacePath`／`generate_namespace_path` の最後の値を使います。
+
+| REST API | 用途 |
+| --- | --- |
+| `GET /namespaces/{namespaceId}` | 所有者、有効期限、エイリアス |
+| `POST /namespaces/names` | IDから名前を取得 |
+| `POST /namespaces/account/names` | アドレスにリンクされた名前を逆引き |
+| `POST /namespaces/mosaic/names` | モザイクにリンクされた名前を逆引き |
+| `GET /statements/resolutions/address?height={height}` | 実行時のアドレス解決結果 |
+| `GET /statements/resolutions/mosaic?height={height}` | 実行時のモザイク解決結果 |
+
+解決レシートでは内部トランザクションも含む source の位置と対象を照合します。
+
+## 参照資料
+
+- [速習Symbolブロックチェーン：ネームスペース](https://github.com/TGVRock/quick_learning_symbol_v3/blob/main/06_namespace.md)
+- [Symbol SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)

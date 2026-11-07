@@ -1,9 +1,9 @@
 {
-  "label": "Symbol SDK入門",
+  "label": "SDK入門",
   "position": 3,
   "link": {
     "type": "generated-index",
     "slug": "/symbol/sdk",
-    "description": "アカウントからトランザクションまで、旧 nemnesia の Symbol SDK 入門原稿を移行した連載です。"
+    "description": "Node.js の TypeScript と Python で Symbol SDK 3.3.3 を使う入門です。"
   }
 }
