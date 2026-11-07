@@ -15,7 +15,7 @@ before(async () => {
   for (const path of ["assets/fonts", "static/img", "plugins", "docs"]) {
     await mkdir(join(siteDir, path), { recursive: true });
   }
-  for (const path of ["assets/fonts/NotoSansJP-Regular.otf", "static/img/Symbol_NEM_Combo_Icon.png"]) {
+  for (const path of ["assets/fonts/NotoSansJP-Regular.otf", "assets/fonts/NotoSansJP-Medium.otf", "static/img/Symbol_NEM_Combo_Icon.png"]) {
     await symlink(join(repository, path), join(siteDir, path));
   }
   await copyFile(join(repository, "plugins/ogp.ts"), join(siteDir, "plugins/ogp.ts"));
@@ -66,14 +66,14 @@ test("手動指定の画像とdocs以外のMarkdownを変更しない", async ()
 
 test("長い日本語と英数字のタイトルを縮小し、極端に長い場合のみ省略する", () => {
   const short = layoutTitle("Symbol SDK入門");
-  assert.equal(short.fontSize, 76);
+  assert.equal(short.fontSize, 64);
   const title = "SymbolノードをUbuntu 24.04で構築し、HTTPSと証明書を設定する手順とバックアップの取得、定期的な保守作業まで解説します";
   const long = layoutTitle(title);
-  assert.ok(long.fontSize < 76);
+  assert.ok(long.fontSize < 64);
   assert.ok(long.lines.length <= 3);
   assert.equal(long.lines.join(""), title);
   const identifier = layoutTitle("W".repeat(60));
-  assert.ok(identifier.fontSize < 76);
+  assert.ok(identifier.fontSize < 64);
   assert.equal(identifier.lines.join(""), "W".repeat(60));
   const extreme = layoutTitle("日本語タイトルとVeryLongIdentifier".repeat(50));
   assert.equal(extreme.fontSize, 44);

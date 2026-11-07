@@ -35,7 +35,7 @@ function wrapTitle(title: string, fontSize: number): string[] {
 
 export function layoutTitle(title: string): { lines: string[]; fontSize: number } {
   const text = title.replace(/\s+/gu, " ").trim();
-  for (const fontSize of [76, 68, 60, 52, 44]) {
+  for (const fontSize of [64, 60, 52, 44]) {
     const lines = wrapTitle(text, fontSize);
     if (lines.length <= 3) return { lines, fontSize };
   }
@@ -50,12 +50,13 @@ export async function createOgp(siteDir: string): Promise<{
   parseFrontMatter: ParseFrontMatter;
 }> {
   const outputDirectory = join(siteDir, "static", imageDirectory);
-  const [font, logo, template] = await Promise.all([
+  const [font, titleFont, logo, template] = await Promise.all([
     readFile(join(siteDir, "assets/fonts/NotoSansJP-Regular.otf")),
+    readFile(join(siteDir, "assets/fonts/NotoSansJP-Medium.otf")),
     readFile(join(siteDir, "static/img/Symbol_NEM_Combo_Icon.png")),
     readFile(join(siteDir, "plugins/ogp.ts")),
   ]);
-  const templateHash = createHash("sha256").update(template).update(font).update(logo).digest("hex");
+  const templateHash = createHash("sha256").update(template).update(font).update(titleFont).update(logo).digest("hex");
   await mkdir(outputDirectory, { recursive: true });
   const pending = new Map<string, Promise<string>>();
 
@@ -82,10 +83,13 @@ export async function createOgp(siteDir: string): Promise<{
           h("img", { src: `data:image/png;base64,${logo.toString("base64")}`, width: 64, height: 64 }),
           siteTitle),
         h("div", { style: { display: "flex", width: 1056, flexDirection: "column", justifyContent: "center", height: 348, flexShrink: 0 } },
-          ...lines.map((line, index) => h("div", { key: index, style: { display: "flex", width: 1056, height: fontSize * 1.3, fontSize, lineHeight: 1.3, flexShrink: 0, whiteSpace: "pre" } }, line))),
+          ...lines.map((line, index) => h("div", { key: index, style: { display: "flex", width: 1056, height: fontSize * 1.3, fontSize, fontWeight: 500, lineHeight: 1.3, flexShrink: 0, whiteSpace: "pre" } }, line))),
         h("div", { style: { display: "flex", width: 1056, height: 56, flexShrink: 0, borderTop: "2px solid #dce6f5", paddingTop: 20, color: "#52657e", fontSize: 24 } }, subtitle)), {
           width: 1200, height: 630,
-          fonts: [{ name: "Noto Sans JP", data: font, weight: 400, style: "normal" }],
+          fonts: [
+            { name: "Noto Sans JP", data: font, weight: 400, style: "normal" },
+            { name: "Noto Sans JP", data: titleFont, weight: 500, style: "normal" },
+          ],
         });
         const png = new Resvg(svg, { font: { loadSystemFonts: false } }).render().asPng();
         // 同時に動く開発サーバー・ビルドにも完成した画像だけを見せる。
