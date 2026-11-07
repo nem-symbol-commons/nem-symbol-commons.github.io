@@ -62,8 +62,8 @@ Explorer のページ表示と、全機能・検索結果の正常性は別で�
 
 ## このサイトの実践記事
 
-- [Symbol Testnetへの接続](../symbol/quickstart.md)
-- [NEM開発クイックスタート](../nem/quickstart.md)
+- [Symbol Testnetへの接続](../symbol/testnet-connection.md)
+- [NEM Testnetへの接続](../nem/testnet-connection.md)
 - [REST APIの基本](rest-api.md)
 
 リンクの追加・修正を提案するときは、対象チェーン、対応バージョン、運営主体、資料の用途を添えてください。

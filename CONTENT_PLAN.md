@@ -12,8 +12,8 @@
 | P0-03 | [NEMとSymbolの違い](docs/common/nem-and-symbol.md) | 初稿あり |
 | P0-04 | [NEM・Symbolの基本用語](docs/getting-started/glossary.md) | 初稿あり |
 | P0-05 | [ネットワーク情報一覧](docs/references/networks.md) | 初稿あり |
-| P0-06 | [Symbol開発クイックスタート](docs/symbol/quickstart.md) | 初稿あり。公開 Testnet への送信・承認は未検証 |
-| P0-07 | [NEM開発クイックスタート](docs/nem/quickstart.md) | 初稿あり。公開 Testnet への送信・取り込みは未検証 |
+| P0-06 | [Symbol Testnetへの接続](docs/symbol/testnet-connection.md) | 初稿あり。公開 Testnet への送信・承認は未検証 |
+| P0-07 | [NEM Testnetへの接続](docs/nem/testnet-connection.md) | 初稿あり。公開 Testnet への送信・取り込みは未検証 |
 | P0-08 | [REST APIの基本](docs/references/rest-api.md) | 初稿あり |
 
 ## 次の執筆対象

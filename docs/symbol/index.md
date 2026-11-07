@@ -17,7 +17,7 @@ Symbol のアカウント、トランザクション、モザイク、ネーム�
 
 ## 最初に試す
 
-[Testnetへの接続](quickstart.md)で、`curl` を使ってノードの稼働状態とブロック高を確認します。
+[Testnetへの接続](testnet-connection.md)で、`curl` を使ってノードの稼働状態とブロック高を確認します。
 
 ## SDK入門
 

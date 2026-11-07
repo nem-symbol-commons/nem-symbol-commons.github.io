@@ -1,0 +1,9 @@
+{
+  "label": "SDK入門",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "slug": "/nem/sdk",
+    "description": "TypeScriptとPythonでNEM(NIS1) SDK 3.3.3を学ぶ入門です。"
+  }
+}

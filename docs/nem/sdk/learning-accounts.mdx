@@ -1,0 +1,167 @@
+---
+title: 学習用アカウントの準備
+description: NEM Testnet専用のニーモニックから4人の学習用アカウントを導出します。
+slug: /nem/sdk/learning-accounts
+sidebar_position: 2.5
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+プロジェクトルートにNEM Testnet専用のニーモニックを保存し、Alice・Bob・Carol・Dave を導出します。
+実資産を持つMainnetのニーモニックや秘密鍵は使わないでください。
+
+## ニーモニックを保存する
+
+片方の言語で一度だけ実行します。`.nem-testnet-mnemonic` がある場合は停止し、上書きしません。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/prepare-accounts.ts"
+import { writeFileSync } from 'node:fs';
+import { Bip32 } from 'symbol-sdk';
+
+// 後続の実行で同じ鍵を復元できるよう、ニーモニックを排他的に保存する。
+writeFileSync('.nem-testnet-mnemonic', new Bip32().random(), {
+  flag: 'wx',
+  mode: 0o600,
+});
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/prepare_accounts.py"
+import os
+from symbolchain.Bip32 import Bip32
+
+# 後続の実行で同じ鍵を復元できるよう、ニーモニックを排他的に保存する。
+fd = os.open(
+    '.nem-testnet-mnemonic', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+)
+with os.fdopen(fd, 'w', encoding='utf8') as file:
+    file.write(Bip32().random())
+```
+
+</TabItem>
+</Tabs>
+
+`.gitignore` に次を追加します。ニーモニックは暗号化されていないので、共有ストレージにも置かないでください。
+
+```gitignore
+.nem-testnet-mnemonic
+.nem-testnet-private-key
+node_modules/
+dist/
+.venv/
+```
+
+## アカウントを読み込む
+
+NEM用の導出パスと `bip32NodeToKeyPair`／`bip32_node_to_key_pair` で鍵を作ります。
+パスフレーズは空文字列です。同じアカウントを復元するには、同じニーモニック・パスフレーズ・導出パスが必要です。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/key-store.ts"
+import { readFileSync } from 'node:fs';
+import { Bip32 } from 'symbol-sdk';
+import { NemFacade } from 'symbol-sdk/nem';
+
+const facade = new NemFacade('testnet');
+
+const mnemonic = readFileSync('.nem-testnet-mnemonic', 'utf8').trim();
+
+const root = new Bip32().fromMnemonic(mnemonic, '');
+
+// NEM固有の鍵変換はSDKに任せ、インデックスごとに4人を導出する。
+function account(index: number) {
+  const child = root.derivePath(facade.bip32Path(index));
+  return facade.createAccount(NemFacade.bip32NodeToKeyPair(child).privateKey);
+}
+
+export const [alice, bob, carol, dave] = [0, 1, 2, 3].map(account);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/key_store.py"
+from pathlib import Path
+from symbolchain.Bip32 import Bip32
+from symbolchain.facade.NemFacade import NemFacade
+
+facade = NemFacade('testnet')
+mnemonic = Path('.nem-testnet-mnemonic').read_text(encoding='utf8').strip()
+root = Bip32().from_mnemonic(mnemonic, '')
+
+
+# NEM固有の鍵変換はSDKに任せ、インデックスごとに4人を導出する。
+def account(index):
+    child = root.derive_path(facade.bip32_path(index))
+    return facade.create_account(
+        NemFacade.bip32_node_to_key_pair(child).private_key
+    )
+
+
+alice, bob, carol, dave = (account(i) for i in range(4))
+```
+
+</TabItem>
+</Tabs>
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/show-accounts.ts"
+import { alice, bob, carol, dave } from './key-store.js';
+
+// 秘密鍵を表示せず、入金先として使うアドレスだけを確認する。
+for (const [name, account] of Object.entries({ alice, bob, carol, dave })) {
+  console.log(name, account.address.toString());
+}
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/show_accounts.py"
+from accounts.key_store import alice, bob, carol, dave
+
+# 秘密鍵を表示せず、入金先として使うアドレスだけを確認する。
+for name, account in [
+    ('alice', alice),
+    ('bob', bob),
+    ('carol', carol),
+    ('dave', dave),
+]:
+    print(name, account.address)
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+# TypeScript
+npx tsc
+node dist/accounts/prepare-accounts.js
+node dist/accounts/show-accounts.js
+
+# Python（別プロジェクトで新規に準備する場合）
+PYTHONPATH=src python src/accounts/prepare_accounts.py
+PYTHONPATH=src python src/accounts/show_accounts.py
+```
+
+同じニーモニックを使う場合、両言語で同じアドレスになります。
+[XEM Faucet](https://testnet.nem.tools/)には公開アドレスだけを指定してTestnet XEMを受け取ります。
+転送には金額と手数料、モザイク・ネームスペースには追加の登録料を用意してください。
+マルチシグと委任ハーベスティングは権限を変えるため、それぞれ別の作業ディレクトリとニーモニックで試します。
+
+## 参照資料
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)

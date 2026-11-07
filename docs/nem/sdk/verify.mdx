@@ -1,0 +1,199 @@
+---
+title: 検証
+description: NEMの署名、非検証形式のデータ、Keccakハッシュとノードの取り込み報告を検証します。
+slug: /nem/sdk/verify
+sidebar_position: 11
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+署名の検証、送信データのハッシュ計算、ノードが報告する取り込みは別の確認です。
+署名が正しくても残高・期限・マルチシグの閾値を満たすとは限らず、取り込みも保証しません。
+
+## 11.1 SDKのモデルと送信データを照合する
+
+[転送](transactions.mdx#32-転送を構築して署名する)の `transfer.bin` と `payload.json` を読み込みます。
+SDKの署名付きモデルを復元し、期待する署名者 Alice、Testnet、署名、実際の送信データを照合します。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-transfer.ts"
+import { readFileSync } from 'node:fs';
+import { utils } from 'symbol-sdk';
+import { NemFacade, models, TransactionFactory } from 'symbol-sdk/nem';
+import { alice } from '../accounts/key-store.js';
+
+const facade = new NemFacade('testnet');
+
+const tx = TransactionFactory.deserialize(
+  new Uint8Array(readFileSync('transfer.bin')),
+);
+
+const payload = JSON.parse(readFileSync('payload.json', 'utf8'));
+
+// 相手が自己申告した公開鍵だけでなく、期待するAliceの公開鍵と照合する。
+if (
+  tx.type.value !== models.TransactionType.TRANSFER.value ||
+  tx.network.value !== 152 ||
+  tx.signerPublicKey.toString() !== alice.publicKey.toString() ||
+  !facade.verifyTransaction(tx, tx.signature)
+) {
+  throw new Error('署名者・ネットワーク・署名が一致しません');
+}
+
+const expectedData = utils.uint8ToHex(
+  TransactionFactory.toNonVerifiableTransaction(tx).serialize(),
+);
+
+if (
+  payload.data.toUpperCase() !== expectedData ||
+  payload.signature.toUpperCase() !== tx.signature.toString()
+) {
+  throw new Error('SDKモデルと送信データが一致しません');
+}
+
+console.log('verified hash:', facade.hashTransaction(tx).toString());
+
+console.log(
+  'deadlineExpired:',
+  BigInt(tx.deadline.value) <= facade.now().timestamp,
+);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_transfer.py"
+import json
+from pathlib import Path
+from symbolchain import nc
+from symbolchain.facade.NemFacade import NemFacade
+from symbolchain.nem.TransactionFactory import TransactionFactory
+from accounts.key_store import alice
+
+facade = NemFacade('testnet')
+tx = TransactionFactory.deserialize(Path('transfer.bin').read_bytes())
+payload = json.loads(Path('payload.json').read_text(encoding='utf8'))
+
+# 相手が自己申告した公開鍵だけでなく、期待するAliceの公開鍵と照合する。
+if (
+    tx.type_ != nc.TransactionType.TRANSFER
+    or tx.network.value != 152
+    or str(tx.signer_public_key) != str(alice.public_key)
+    or not facade.verify_transaction(tx, tx.signature)
+):
+    raise ValueError('署名者・ネットワーク・署名が一致しません')
+expected_data = (
+    TransactionFactory.to_non_verifiable_transaction(tx)
+    .serialize()
+    .hex()
+    .upper()
+)
+if payload['data'].upper() != expected_data or payload[
+    'signature'
+].upper() != str(tx.signature):
+    raise ValueError('SDKモデルと送信データが一致しません')
+print('verified hash:', facade.hash_transaction(tx))
+print('deadlineExpired:', tx.deadline.value <= facade.now().timestamp)
+```
+
+</TabItem>
+</Tabs>
+
+期限切れでも署名自体は正しい場合があります。署名の真正性とネットワークが受理する条件を分けて判断します。
+検証対象の金額などを1か所変更すると、署名または送信データの照合が失敗することを確認してください。
+
+## 11.2 送信データだけから署名とハッシュを確認する
+
+`data` はNEMの非検証形式です。公開鍵はこのデータから取り出し、`signature` を別に検証します。
+ハッシュはこのバイト列の **Keccak-256** で、標準化された SHA3-256 とは異なります。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/verify/verify-payload.ts"
+import { readFileSync } from 'node:fs';
+import { keccak_256 } from '@noble/hashes/sha3.js';
+import { Hash256, PublicKey, Signature, utils } from 'symbol-sdk';
+import { models, Verifier } from 'symbol-sdk/nem';
+import { alice } from '../accounts/key-store.js';
+
+const payload = JSON.parse(readFileSync('payload.json', 'utf8'));
+
+const data = utils.hexToUint8(payload.data);
+
+const tx = models.NonVerifiableTransactionFactory.deserialize(data);
+
+// 通常転送の送信者がAliceであり、署名がバイト列全体に対応することを確認する。
+if (
+  tx.type.value !== models.TransactionType.TRANSFER.value ||
+  tx.network.value !== 152 ||
+  tx.signerPublicKey.toString() !== alice.publicKey.toString() ||
+  !new Verifier(new PublicKey(tx.signerPublicKey.bytes)).verify(
+    data,
+    new Signature(payload.signature),
+  )
+) {
+  throw new Error('転送の署名が不正です');
+}
+
+console.log('hash:', new Hash256(keccak_256(data)).toString());
+
+console.log(JSON.stringify(tx.toJson(), null, 2));
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/verify/verify_payload.py"
+import json
+import sha3
+from pathlib import Path
+from symbolchain import nc
+from symbolchain.CryptoTypes import Hash256, PublicKey, Signature
+from symbolchain.nem.KeyPair import Verifier
+from accounts.key_store import alice
+
+payload = json.loads(Path('payload.json').read_text(encoding='utf8'))
+data = bytes.fromhex(payload['data'])
+tx = nc.NonVerifiableTransactionFactory.deserialize(data)
+
+# 通常転送の送信者がAliceであり、署名がバイト列全体に対応することを確認する。
+if (
+    tx.type_ != nc.TransactionType.TRANSFER
+    or tx.network.value != 152
+    or str(tx.signer_public_key) != str(alice.public_key)
+    or not Verifier(PublicKey(tx.signer_public_key.bytes)).verify(
+        data, Signature(payload['signature'])
+    )
+):
+    raise ValueError('転送の署名が不正です')
+print('hash:', Hash256(sha3.keccak_256(data).digest()))
+print(json.dumps(tx.to_json(), indent=2))
+```
+
+</TabItem>
+</Tabs>
+
+マルチシグの場合、外側の署名検証に加えて、各連署の署名・内部ハッシュ・対象アドレスを照合します。
+実装は[オフライン署名](offline-signature.mdx#103-bob-が連署を検証する)を参照してください。
+
+## 11.3 取り込みの報告と独立検証を区別する
+
+`GET /transaction/get?hash={hash}` の `meta.hash.data` とローカルのハッシュを比較し、`meta.height` を確認します。
+これは問い合わせたノードの報告との照合です。レスポンスの各フィールドまでローカルの内容と同じとは、ハッシュの表示だけでは判断できません。
+
+NISの残高や履歴を取得しただけでは、その応答の真正性を独立して証明したことにはなりません。
+Symbolの状態証明や投票によるファイナライズの手順をNEMのAPIへ当てはめないでください。
+より強い確認が必要な処理では、自分が管理する同期済みNISと照合し、チェーン分岐を考慮した確認ブロック数を決めます。
+署名者が正しいこと、期待した取引内容であること、正規チェーンに取り込まれていることをそれぞれ確認します。
+
+## 参照資料
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)
+- [NEMのハッシュと署名対象](https://github.com/symbol/symbol/blob/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk/javascript/src/facade/NemFacade.js)

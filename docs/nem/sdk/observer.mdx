@@ -1,0 +1,443 @@
+---
+title: 監視
+description: NISのRESTでブロック・残高・未承認情報・履歴を監視し、通知と使い分けます。
+slug: /nem/sdk/observer
+sidebar_position: 9
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+NISのREST APIを定期的に取得し、ブロック高、残高、未承認情報、承認済み履歴の変化を確認します。
+[学習用アカウント](learning-accounts.mdx)と `NEM_NODE` を準備してください。
+イベント通知を使う場合は、[WebSocket通知](#93-websocket通知)へ進みます。
+
+## 9.1 ブロック・アカウント・転送を確認する
+
+5秒ごとに取得し、3分で終了します。`--once` を付けると1回だけ取得します。
+未承認は `/account/unconfirmedTransactions`、承認済みは `/account/transfers/all` で取得します。
+未承認の `meta.data` はマルチシグの内部ハッシュで、通常は `null` です。外側の取引ハッシュとしては使えません。
+
+未承認では署名のバイト列からSHA-256の重複排除用IDを計算します。このIDはNEMの取引ハッシュではありません。
+承認済みでは `meta.hash.data` を使い、両状態を別々に記録します。
+同じ取引が未承認から承認済みに移ったかを照合する場合は、両応答の `transaction.signature` を比較してください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/observer/watch-account.ts"
+import JSONBig from 'json-bigint';
+import { createHash } from 'node:crypto';
+import { alice } from '../accounts/key-store.js';
+
+const node = process.env.NEM_NODE?.replace(/\/$/, '');
+
+const json = JSONBig({ useNativeBigInt: true });
+
+// 数値の桁を失わないよう、JSON.parseではなく64ビット対応のparserを使う。
+async function get(path: string) {
+  if (!node)
+    throw new Error('NEM_NODE に NIS Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
+  return json.parse(await response.text());
+}
+
+const seen = new Set<string>();
+
+const until = Date.now() + 180_000;
+
+let previousHeight: string | undefined;
+
+// NISにはSymbolの購読UIDはない。ここではRESTを定期取得する。
+do {
+  const chain = await get('/chain/height');
+  const height = String(chain.height);
+  if (height !== previousHeight) {
+    console.log('height:', height);
+    previousHeight = height;
+  }
+  const state = await get(`/account/get?address=${alice.address}`);
+  console.log('balanceAtomic:', String(state.account.balance));
+
+  // 未承認の応答にはmeta.hashがないため、署名からIDを計算する。
+  const pending = await get(
+    `/account/unconfirmedTransactions?address=${alice.address}`,
+  );
+  for (const record of pending.data) {
+    const id = createHash('sha256')
+      .update(Buffer.from(record.transaction.signature, 'hex'))
+      .digest('hex');
+    const key = `unconfirmed:${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    console.log('unconfirmed signatureId:', id, record);
+  }
+
+  // 承認済みの応答は、NISが返す取引ハッシュで重複を除く。
+  const history = await get(
+    `/account/transfers/all?address=${alice.address}`,
+  );
+  for (const record of history.data) {
+    const hash = record.meta.hash.data;
+    const key = `confirmed:${hash}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    console.log('confirmed hash:', hash, record);
+  }
+
+  if (process.argv.includes('--once')) break;
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+} while (Date.now() < until);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/observer/watch_account.py"
+import hashlib
+import os
+import sys
+import time
+import requests
+from accounts.key_store import alice
+
+
+# requests の JSON decoder は整数を Python の int として保持する。
+def get(path):
+    node = os.environ['NEM_NODE'].rstrip('/')
+    response = requests.get(node + path, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+
+seen = set()
+until = time.monotonic() + 180
+previous_height = None
+
+# NISにはSymbolの購読UIDはない。ここではRESTを定期取得する。
+while time.monotonic() < until:
+    chain = get('/chain/height')
+    if chain['height'] != previous_height:
+        print('height:', chain['height'])
+        previous_height = chain['height']
+    state = get(f'/account/get?address={alice.address}')
+    print('balanceAtomic:', state['account']['balance'])
+    # 未承認の応答にはmeta.hashがないため、署名からIDを計算する。
+    pending = get(f'/account/unconfirmedTransactions?address={alice.address}')
+    for record in pending['data']:
+        signature = bytes.fromhex(record['transaction']['signature'])
+        signature_id = hashlib.sha256(signature).hexdigest()
+        key = ('unconfirmed', signature_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        print('unconfirmed signatureId:', signature_id, record)
+
+    # 承認済みの応答は、NISが返す取引ハッシュで重複を除く。
+    history = get(f'/account/transfers/all?address={alice.address}')
+    for record in history['data']:
+        tx_hash = record['meta']['hash']['data']
+        key = ('confirmed', tx_hash)
+        if key in seen:
+            continue
+        seen.add(key)
+        print('confirmed hash:', tx_hash, record)
+
+    if '--once' in sys.argv:
+        break
+    time.sleep(5)
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+node dist/observer/watch-account.js --once
+# または
+PYTHONPATH=src python src/observer/watch_account.py --once
+```
+
+アドレスに関係する履歴には送信も含まれます。入金を判定する場合は転送の `recipient` と金額・モザイクを確認し、
+マルチシグでは `otherTrans` 内も調べます。マルチシグの連署対象は内部ハッシュなので、外側ハッシュと取り違えないでください。
+
+## 9.2 切断・再起動後に照合する
+
+履歴はページ分割されます。この短時間の例では直近のページを表示しています。
+長時間の監視では最後に処理したブロック高・ハッシュ・履歴の `meta.id` を保存し、
+`/account/transfers/all` の `id` パラメータで過去のページへ戻って未処理分を照合します。
+APIの一時的な取得失敗だけで、転送が存在しなかったとは判断しません。
+
+未承認一覧から消えた理由は、取り込み・期限切れなどを別途調べます。承認済み履歴と照合してください。
+NEMの取り込みをSymbolの投票によるファイナライズとして扱わず、必要な確認ブロック数をアプリケーション側で決めます。
+
+## 9.3 WebSocket通知
+
+NISはSockJS上のSTOMPでブロック・アカウント・トランザクションの更新を通知します。
+以下はTypeScriptで通知を受ける実装です。Pythonの監視は前節のRESTポーリングを使います。
+切断中のイベントはRESTの履歴で補完してください。
+
+### 接続先とプロトコル
+
+ローカルノードへの接続先の例は `http://localhost:7778/messages` です。
+ホスト名、ポート、HTTP / HTTPS は、接続先ノードの公開設定に合わせてください。
+
+`/messages` は SockJS のエンドポイントです。通常の WebSocket クライアントへこの HTTP URL をそのまま渡すのではなく、SockJS クライアントを使います。
+その上で、STOMP のコマンドを使って購読やデータ取得を行います。
+
+| コマンド | 用途 |
+| --- | --- |
+| `CONNECT` | STOMP セッションを開始する |
+| `SUBSCRIBE` | 通知先を購読する |
+| `SEND` | ノードに情報取得やアカウントの監視登録を要求する |
+| `MESSAGE` | ノードからデータを受信する |
+| `UNSUBSCRIBE` | 購読を解除する |
+| `DISCONNECT` | セッションを終了する |
+
+StompJS では、`subscribe()` が `SUBSCRIBE`、`publish()` が `SEND` に対応します。
+受信した JSON は `JSON.parse(message.body)` で読み取ります。
+
+### 購読先と取得リクエスト
+
+表中の `{address}` は、接続先ネットワークの NEM アドレスに置き換えてください。
+アカウントを指定する `SEND` の本文は、いずれも `{"account":"アドレス"}` です。
+
+#### ブロック
+
+| 購読先 | 受信するデータ |
+| --- | --- |
+| `/blocks/new` | ブロック高を持つ `BlockHeight` |
+| `/blocks` | トランザクションなどを含む `Block` |
+
+`/blocks/new` はチェーン更新時の通知です。複数ブロックの同期時に、各ブロックにつき1回届くとは限りません。
+現在の最終ブロックを取得するには、`/blocks` を購読した後、`/w/api/block/last` へ `SEND` します。
+
+#### アカウント・モザイク・ネームスペース
+
+| 購読先 | SEND 先（`/w/api` に続くパス） | 受信するデータ |
+| --- | --- | --- |
+| `/account/{address}` | `/account/get` | `AccountMetaDataPair` |
+| `/account/mosaic/owned/definition/{address}` | `/account/mosaic/owned/definition` | `MosaicDefinitionSupplyPair` |
+| `/account/mosaic/owned/{address}` | `/account/mosaic/owned` | `Mosaic` |
+| `/account/namespace/owned/{address}` | `/account/namespace/owned` | `Namespace` |
+
+モザイクやネームスペースの取得では、項目ごとにメッセージが届きます。配列が1回返る形式ではありません。
+
+#### トランザクション
+
+| 購読先 | 受信するデータ |
+| --- | --- |
+| `/transactions/{address}` | 承認済みの `TransactionMetaDataPair` |
+| `/unconfirmed/{address}` | 未承認の `TransactionMetaDataPair` |
+| `/recenttransactions/{address}` | 直近の `TransactionMetaDataPair` の一覧（`data` 配列） |
+
+アドレス別の更新通知には、STOMP の購読に加えて NIS 側の監視登録が必要です。
+購読後に `/w/api/account/subscribe` へ `SEND` してください。
+`/w/api/account/get` も監視登録を行い、現在のアカウント情報を返します。
+
+直近の承認済み履歴は `/w/api/account/transfers/all`、未承認情報は `/w/api/account/transfers/unconfirmed` で要求します。
+`/account/transfers/all` は未承認情報の送信も行います。これらの取得リクエスト自体は監視登録を行いません。
+
+パスとデータ型は [NIS のコントローラー](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/websocket/WebsocketInitController.java)と[通知処理](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/websocket/MessagingService.java)に基づきます。
+
+### TypeScript から接続する
+
+対象は Node.js 24 系、`@stomp/stompjs@7.2.0`、`sockjs-client@1.6.1`、NIS v0.6.102 です。
+接続先ノードで SockJS の `/messages` が公開されている必要があります。
+実ノードとの継続接続・通知受信は未検証です。
+
+```bash
+# 環境構築で作成したTypeScriptプロジェクトで実行する。
+npm install --save-exact @stomp/stompjs@7.2.0 sockjs-client@1.6.1
+npm install --save-dev --save-exact @types/sockjs-client@1
+mkdir -p src/observer
+```
+
+#### ブロックを購読する
+
+`src/observer/connect-notifications.ts` に保存します。
+
+```ts title="src/observer/connect-notifications.ts"
+import SockJS from 'sockjs-client';
+import { Client } from '@stomp/stompjs';
+
+const wsUrl = process.env.NEM_WS_URL ?? 'http://localhost:7778/messages';
+
+// 接続が切れたら、再接続後にonConnectで購読し直す。
+const client = new Client({
+  webSocketFactory: () => new SockJS(wsUrl),
+  reconnectDelay: 5000,
+});
+
+client.onConnect = () => {
+  console.log('Connected');
+
+  client.subscribe('/blocks', (message) => {
+    console.log('Block:', JSON.parse(message.body));
+  });
+
+  client.subscribe('/blocks/new', (message) => {
+    const data = JSON.parse(message.body);
+    console.log('Block height:', data.height);
+  });
+
+  // 接続直後の最終ブロックを取得する
+  client.publish({ destination: '/w/api/block/last', body: '{}' });
+};
+
+client.onStompError = (frame) => {
+  console.error('STOMP error:', frame.headers.message, frame.body);
+};
+
+client.onWebSocketError = (event) => {
+  console.error('Connection error:', event);
+};
+
+process.on('SIGINT', async () => {
+  await client.deactivate();
+});
+
+client.activate();
+```
+
+```bash
+npx tsc
+node dist/observer/connect-notifications.js
+```
+
+別のノードに接続する場合は、環境変数で指定します。
+
+```bash
+NEM_WS_URL=http://YOUR_NODE:7778/messages node dist/observer/connect-notifications.js
+```
+
+接続すると `Connected` が表示され、`/w/api/block/last` の応答が `Block:` に続きます。
+以降はノードが配信するブロック通知を受信します。終了は `Ctrl+C` です。
+
+#### アカウントとトランザクションを購読する
+
+`src/observer/watch-notifications.ts` に保存し、監視するアドレスを引数で渡します。
+
+```ts title="src/observer/watch-notifications.ts"
+import SockJS from 'sockjs-client';
+import { Client } from '@stomp/stompjs';
+
+const wsUrl = process.env.NEM_WS_URL ?? 'http://localhost:7778/messages';
+
+const accountAddress = process.argv[2]?.replace(/-/g, '').toUpperCase();
+
+if (!accountAddress) {
+  throw new Error(
+    'Usage: node dist/observer/watch-notifications.js <NEM_ADDRESS>',
+  );
+}
+
+// 接続が切れたら、再接続後にonConnectで購読し直す。
+const client = new Client({
+  webSocketFactory: () => new SockJS(wsUrl),
+  reconnectDelay: 5000,
+});
+
+client.onConnect = () => {
+  console.log('Connected');
+
+  const destinations = [
+    `/account/${accountAddress}`,
+    `/unconfirmed/${accountAddress}`,
+    `/transactions/${accountAddress}`,
+    `/recenttransactions/${accountAddress}`,
+  ];
+  for (const destination of destinations) {
+    client.subscribe(destination, (message) => {
+      console.log(destination, JSON.parse(message.body));
+    });
+  }
+
+  // 監視登録と現在のアカウント情報の取得
+  client.publish({
+    destination: '/w/api/account/get',
+    body: JSON.stringify({ account: accountAddress }),
+  });
+
+  // 直近の承認済み履歴と未承認情報の取得
+  client.publish({
+    destination: '/w/api/account/transfers/all',
+    body: JSON.stringify({ account: accountAddress }),
+  });
+};
+
+client.onStompError = (frame) => {
+  console.error('STOMP error:', frame.headers.message, frame.body);
+};
+
+client.onWebSocketError = (event) => {
+  console.error('Connection error:', event);
+};
+
+process.on('SIGINT', async () => {
+  await client.deactivate();
+});
+
+client.activate();
+```
+
+```bash
+npx tsc
+node dist/observer/watch-notifications.js YOUR_NEM_ADDRESS
+```
+
+`/account/…` にアカウント情報、`/recenttransactions/…` に直近の承認済み履歴が届きます。
+ノードが未承認トランザクションを保持していれば、`/unconfirmed/…` にも通知されます。
+その後は、監視対象に関する更新を受信します。
+
+#### 購読解除と再接続
+
+`subscribe()` が返すオブジェクトの `unsubscribe()` で、その購読を解除します。
+接続全体を終了する場合は `await client.deactivate()` を使います。
+
+```ts
+// 接続済みclientの購読を解除する。
+const subscription = client.subscribe('/blocks', (message) => {
+  console.log(JSON.parse(message.body));
+});
+
+subscription.unsubscribe();
+```
+
+この購読解除は STOMP の受信を止める操作です。NIS v0.6.102 のコントローラーには、アカウントの監視登録を解除する `SEND` パスはありません。
+
+`reconnectDelay: 5000` は、切断後に5秒間隔で再接続を試みる設定です。
+購読と初期情報取得を `onConnect` 内に置くと、再接続時にも実行されます。
+切断中の通知をすべて再取得できるわけではないため、必要な履歴は [NIS1 API](https://nemproject.github.io/) でも照合してください。
+
+### 通知が届かないとき
+
+| 症状 | 確認する点 |
+| --- | --- |
+| 接続できない | ホスト名、ポート、HTTP / HTTPS、ノードの SockJS 公開設定を確認する |
+| 接続できるが通知がない | 購読パスとネットワークを確認する。イベント発生前は通知されない場合がある |
+| アドレス別の更新が届かない | 購読後に `/w/api/account/subscribe` または `/w/api/account/get` を送ったか確認する |
+| 初期情報が届かない | 応答先の購読後に、対応する取得リクエストを送ったか確認する |
+| 再接続後に通知が止まる | `onConnect` 内で購読と監視登録をやり直しているか確認する |
+
+取得リクエストの処理エラーは `/errors` に配信されます。必要に応じて、このパスも購読してください。
+STOMP のエラーを受け取る `onStompError` とは別です。
+
+## 参照資料
+
+- [NIS API（未承認トランザクションと応答形式）](https://nemproject.github.io/)
+- [未承認一覧の取得処理](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/controller/AccountController.java)
+- [未承認のメタデータ](https://github.com/NemProject/nem/blob/v0.6.102/core/src/main/java/org/nem/core/model/ncc/UnconfirmedTransactionMetaData.java)
+
+- [NIS v0.6.102 の SockJS 設定](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/specific/deploy/NisWebAppWebsocketInitializer.java)
+- [SEND パスと監視登録](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/websocket/WebsocketInitController.java)
+- [通知先とデータ構造](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/websocket/MessagingService.java)
+- [ブロック高の JSON 形式](https://github.com/NemProject/nem/blob/v0.6.102/core/src/main/java/org/nem/core/model/primitive/BlockHeight.java)
+- [StompJS の接続・購読・切断](https://stomp-js.github.io/guide/stompjs/using-stompjs-v5.html)
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)

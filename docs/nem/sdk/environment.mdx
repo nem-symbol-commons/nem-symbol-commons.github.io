@@ -1,0 +1,132 @@
+---
+title: 環境構築
+description: TypeScriptとPythonでNEM SDK 3.3.3をインストールし、実行環境を確認します。
+slug: /nem/sdk/environment
+sidebar_position: 1
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+TypeScript は Node.js 24以降、Python は3.10以降を使います。
+対象は `symbol-sdk@3.3.3` と `symbol-sdk-python==3.3.3` です。
+パッケージ名は Symbol ですが、NEM(NIS1)には `NemFacade` とNEM用のモデルを選びます。
+
+## プロジェクトを作る
+
+使用する言語の作業ディレクトリを作り、コードを `src/` 以下へ保存します。
+両言語を試す場合は別々のディレクトリを使ってください。
+
+```text
+src/
+├── environment/
+├── accounts/
+├── transactions/
+├── messages/
+├── mosaic/
+├── namespace/
+├── multisig/
+├── harvesting/
+├── observer/
+├── offline-signature/
+└── verify/
+```
+
+Python の `offline-signature` は `offline_signature` とします。以下のシェルコマンドは Linux / macOS / WSL 用です。
+
+### TypeScript
+
+```bash
+mkdir nem-typescript
+cd nem-typescript
+npm init -y
+npm pkg set type=module
+
+# JSONの64ビット整数とKeccakハッシュを扱うライブラリも用意する。
+npm install --save-exact symbol-sdk@3.3.3 json-bigint@1.0.0 \
+  @noble/hashes@2.3.0
+npm install --save-dev --save-exact typescript@6.0.2 @types/node@24 \
+  @types/json-bigint@1
+mkdir -p src/environment
+```
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}
+```
+
+### Python
+
+```bash
+mkdir nem-python
+cd nem-python
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 仮想環境へSDKとHTTPクライアントをインストールする。
+python -m pip install symbol-sdk-python==3.3.3 requests==2.34.2
+mkdir -p src/environment
+```
+
+PowerShell では `.venv\Scripts\Activate.ps1` で有効にし、`$env:PYTHONPATH="src"` を設定します。
+
+## SDKの読み込みを確認する
+
+`NemFacade('testnet')` はNEM Testnetのアドレス・署名・時刻の設定を選びます。この時点ではノードに接続しません。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/environment/check-sdk.ts"
+import { NemFacade } from 'symbol-sdk/nem';
+
+// NEMのTestnet設定を選択する。SymbolFacadeとは別の署名ルールを使う。
+const facade = new NemFacade('testnet');
+
+console.log(facade.network.name, facade.network.identifier);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/environment/check_sdk.py"
+from symbolchain.facade.NemFacade import NemFacade
+
+# NEMのTestnet設定を選択する。SymbolFacadeとは別の署名ルールを使う。
+facade = NemFacade('testnet')
+print(facade.network.name, facade.network.identifier)
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+# TypeScript
+npx tsc
+node dist/environment/check-sdk.js
+
+# Python
+PYTHONPATH=src python src/environment/check_sdk.py
+```
+
+`testnet 152` と表示されれば準備完了です。以後もプロジェクトルートから実行します。
+`npm list symbol-sdk`／`python -m pip show symbol-sdk-python` でバージョンを確認できます。
+次に[アカウント](accounts.mdx)を作成します。
+
+## 参照資料
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)

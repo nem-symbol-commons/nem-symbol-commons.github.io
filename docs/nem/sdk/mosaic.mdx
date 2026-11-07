@@ -1,0 +1,537 @@
+---
+title: モザイク
+description: NEMモザイクの定義、供給量、倍率による転送とlevy。
+slug: /nem/sdk/mosaic
+sidebar_position: 5
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+NEMのモザイクは `ネームスペース:モザイク名` で識別します。Symbolの64ビットのモザイクIDは使いません。
+先に[ネームスペース](namespace.mdx)で Alice 所有の名前を登録し、`NEM_NAMESPACE` に設定してください。
+`NEM_MOSAIC` は作成するモザイク名です。
+
+```bash
+export NEM_NAMESPACE='自分が所有するネームスペース'
+export NEM_MOSAIC='voucher'
+```
+
+## 5.1 モザイクを定義する
+
+可分性2、初期供給量1,000のモザイクを発行します。`initialSupply` は**整数の単位数**で、1,000.00に相当します。
+アカウントの保有量や転送数量は最小単位なので、Alice に記録される数量は100,000になります。
+
+| プロパティ | 値 | 意味 |
+| --- | --- | --- |
+| `divisibility` | `2` | 最小単位は0.01 |
+| `initialSupply` | `1000` | 初期供給量は1,000.00 |
+| `supplyMutable` | `true` | 所有者が供給量を変更できる |
+| `transferable` | `true` | 所有者以外のアカウント間でも転送できる |
+
+SDKが返す登録料は10 XEMで、トランザクション手数料とは別です。
+以下はTestnetの登録料受取先を指定しています。Mainnet用の受取先へ変更して実行しないでください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/mosaic/create-mosaic.ts"
+import {
+  Address,
+  calculateMosaicRentalFee,
+  NemFacade,
+  descriptors,
+  models,
+  calculateTransactionFee,
+  TransactionFactory,
+} from 'symbol-sdk/nem';
+import { alice, carol } from '../accounts/key-store.js';
+
+const facade = new NemFacade('testnet');
+
+const namespace = process.env.NEM_NAMESPACE;
+
+const name = process.env.NEM_MOSAIC;
+
+if (!namespace || !name)
+  throw new Error('NEM_NAMESPACE と NEM_MOSAIC が必要です');
+
+const id = new descriptors.MosaicIdDescriptor(
+  new descriptors.NamespaceIdDescriptor(namespace),
+  name,
+);
+
+// プロパティの値は文字列のUTF-8バイト列で記録される。
+const properties = Object.entries({
+  divisibility: '2',
+  initialSupply: '1000',
+  supplyMutable: 'true',
+  transferable: 'true',
+}).map(
+  ([key, value]) =>
+    new descriptors.SizePrefixedMosaicPropertyDescriptor(
+      new descriptors.MosaicPropertyDescriptor(key, value),
+    ),
+);
+
+// WITH_LEVY=1 の場合だけ、Carol に0.01 XEMを徴収する定額levyを付ける。
+const levy =
+  process.env.WITH_LEVY === '1'
+    ? new descriptors.MosaicLevyDescriptor(
+        models.MosaicTransferFeeType.ABSOLUTE,
+        carol.address,
+        new descriptors.MosaicIdDescriptor(
+          new descriptors.NamespaceIdDescriptor('nem'),
+          'xem',
+        ),
+        new models.Amount(10_000n),
+      )
+    : undefined;
+
+const definition = new descriptors.MosaicDefinitionDescriptor(
+  alice.publicKey,
+  id,
+  'Learning voucher',
+  properties,
+  levy,
+);
+
+const descriptor = new descriptors.MosaicDefinitionTransactionV1Descriptor(
+  definition,
+  new Address('TBMOSAICOD4F54EE5CDMR23CCBGOAM2XSJBR5OLC'),
+  new models.Amount(calculateMosaicRentalFee()),
+);
+
+const tx = facade.createTransactionFromTypedDescriptor(
+  descriptor,
+  alice.publicKey,
+  0n,
+  7200,
+);
+
+// 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = new models.Amount(calculateTransactionFee(tx));
+
+const signature = alice.signTransaction(tx);
+
+if (!facade.verifyTransaction(tx, signature))
+  throw new Error('署名検証に失敗しました');
+
+const body = TransactionFactory.attachSignature(tx, signature);
+
+console.log(body);
+
+console.log('hash:', facade.hashTransaction(tx).toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/mosaic/create_mosaic.py"
+import os
+from symbolchain.nem.Network import Address
+from symbolchain.nem.FeeCalculator import calculate_mosaic_rental_fee
+from symbolchain import nc
+from symbolchain.facade.NemFacade import NemFacade
+from symbolchain.nem.FeeCalculator import calculate_transaction_fee
+from symbolchain.nem.TransactionFactory import TransactionFactory
+from accounts.key_store import alice, carol
+
+facade = NemFacade('testnet')
+
+namespace = os.environ['NEM_NAMESPACE']
+name = os.environ['NEM_MOSAIC']
+mosaic_id = {'namespace_id': {'name': namespace}, 'name': name}
+
+# property_ はPythonの予約名との衝突を避けたSDKのフィールド名。
+properties = [
+    {'property_': {'name': key, 'value': value}}
+    for key, value in {
+        'divisibility': '2',
+        'initialSupply': '1000',
+        'supplyMutable': 'true',
+        'transferable': 'true',
+    }.items()
+]
+definition = {
+    'owner_public_key': alice.public_key,
+    'id': mosaic_id,
+    'description': 'Learning voucher',
+    'properties': properties,
+}
+
+# WITH_LEVY=1 の場合だけ、Carol に0.01 XEMを徴収する定額levyを付ける。
+if os.environ.get('WITH_LEVY') == '1':
+    definition['levy'] = {
+        'transfer_fee_type': 'absolute',
+        'recipient_address': carol.address,
+        'mosaic_id': {'namespace_id': {'name': 'nem'}, 'name': 'xem'},
+        'fee': 10_000,
+    }
+tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'mosaic_definition_transaction_v1',
+        'mosaic_definition': definition,
+        'rental_fee_sink': Address(
+            'TBMOSAICOD4F54EE5CDMR23CCBGOAM2XSJBR5OLC'
+        ),
+        'rental_fee': calculate_mosaic_rental_fee(),
+    },
+    alice.public_key,
+    0,
+    7200,
+)
+
+# 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = nc.Amount(calculate_transaction_fee(tx))
+signature = alice.sign_transaction(tx)
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+body = TransactionFactory.attach_signature(tx, signature)
+print(body)
+print('hash:', facade.hash_transaction(tx))
+```
+
+</TabItem>
+</Tabs>
+
+表示されたJSONを `payload.json` に保存し、[送信手順](transactions.mdx#33-明示的に送信する)で登録します。
+同じ名前で定義し直すと変更処理になるため、初回発行の再試行では取り込みと現在の定義を先に確認してください。
+説明以外のプロパティやlevyを変更する場合は、発行者が全供給量を保有する条件もあります。
+
+## 5.2 供給量を変更する
+
+所有者 Alice が `increase` で100を追加すると、供給量は1,100.00になります。
+この変更量も整数単位です。`decrease` で減らすには、その数量を所有者が保有している必要があります。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/mosaic/change-supply.ts"
+import {
+  NemFacade,
+  descriptors,
+  models,
+  calculateTransactionFee,
+  TransactionFactory,
+} from 'symbol-sdk/nem';
+import { alice } from '../accounts/key-store.js';
+
+const facade = new NemFacade('testnet');
+
+const namespace = process.env.NEM_NAMESPACE;
+
+const name = process.env.NEM_MOSAIC;
+
+if (!namespace || !name)
+  throw new Error('NEM_NAMESPACE と NEM_MOSAIC が必要です');
+
+// 供給量変更のdeltaは整数単位。可分性2でも100をそのまま指定する。
+const id = new descriptors.MosaicIdDescriptor(
+  new descriptors.NamespaceIdDescriptor(namespace),
+  name,
+);
+
+const tx = facade.createTransactionFromTypedDescriptor(
+  new descriptors.MosaicSupplyChangeTransactionV1Descriptor(
+    id,
+    models.MosaicSupplyChangeAction.INCREASE,
+    new models.Amount(100n),
+  ),
+  alice.publicKey,
+  0n,
+  7200,
+);
+
+// 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = new models.Amount(calculateTransactionFee(tx));
+
+const signature = alice.signTransaction(tx);
+
+if (!facade.verifyTransaction(tx, signature))
+  throw new Error('署名検証に失敗しました');
+
+const body = TransactionFactory.attachSignature(tx, signature);
+
+console.log(body);
+
+console.log('hash:', facade.hashTransaction(tx).toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/mosaic/change_supply.py"
+import os
+from symbolchain import nc
+from symbolchain.facade.NemFacade import NemFacade
+from symbolchain.nem.FeeCalculator import calculate_transaction_fee
+from symbolchain.nem.TransactionFactory import TransactionFactory
+from accounts.key_store import alice
+
+facade = NemFacade('testnet')
+
+# 供給量変更のdeltaは整数単位。可分性2でも100をそのまま指定する。
+tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'mosaic_supply_change_transaction_v1',
+        'mosaic_id': {
+            'namespace_id': {'name': os.environ['NEM_NAMESPACE']},
+            'name': os.environ['NEM_MOSAIC'],
+        },
+        'action': 'increase',
+        'delta': 100,
+    },
+    alice.public_key,
+    0,
+    7200,
+)
+
+# 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = nc.Amount(calculate_transaction_fee(tx))
+signature = alice.sign_transaction(tx)
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+body = TransactionFactory.attach_signature(tx, signature)
+print(body)
+print('hash:', facade.hash_transaction(tx))
+```
+
+</TabItem>
+</Tabs>
+
+## 5.3 モザイクを転送する
+
+モザイク付きTransfer V2の `amount` は、添付モザイク全体に掛ける倍率です。
+`amount = 1_000_000` なら1倍で、添付数量100は可分性2で1.00になります。
+ここで1 XEMを同時に送っているわけではありません。XEMも添付する場合は `nem:xem` をモザイク配列へ追加します。
+
+手数料計算には現在の供給量と可分性が必要です。以下では定義をページングして探し、供給量を別のAPIから取得します。
+`initialSupply` を現在の供給量として使わないでください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/mosaic/transfer-mosaic.ts"
+import JSONBig from 'json-bigint';
+import {
+  NemFacade,
+  descriptors,
+  models,
+  calculateTransactionFee,
+  TransactionFactory,
+} from 'symbol-sdk/nem';
+import { alice, bob } from '../accounts/key-store.js';
+
+const facade = new NemFacade('testnet');
+
+const node = process.env.NEM_NODE?.replace(/\/$/, '');
+
+const json = JSONBig({ useNativeBigInt: true });
+
+// 数値の桁を失わないよう、JSON.parseではなく64ビット対応のparserを使う。
+async function get(path: string) {
+  if (!node)
+    throw new Error('NEM_NODE に NIS Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
+  return json.parse(await response.text());
+}
+
+const namespace = process.env.NEM_NAMESPACE;
+
+const name = process.env.NEM_MOSAIC;
+
+if (!namespace || !name)
+  throw new Error('NEM_NAMESPACE と NEM_MOSAIC が必要です');
+
+// 定義は複数ページになるので、meta.idをカーソルにして目的の名前を探す。
+let cursor: string | undefined;
+
+let definition;
+
+while (!definition) {
+  const query = new URLSearchParams({
+    namespace,
+    ...(cursor ? { id: cursor } : {}),
+  });
+  const result = await get(`/namespace/mosaic/definition/page?${query}`);
+  definition = result.data.find(
+    (entry: any) => entry.mosaic.id.name === name,
+  )?.mosaic;
+  if (definition) break;
+  if (!result.data.length) throw new Error('モザイク定義が見つかりません');
+  const next = String(result.data[result.data.length - 1].meta.id);
+  if (next === cursor) throw new Error('定義のページングが進みません');
+  cursor = next;
+}
+
+const divisibility = Number(
+  definition.properties.find((p: any) => p.name === 'divisibility').value,
+);
+
+const qualified = `${namespace}:${name}`;
+
+const supply = await get(
+  `/mosaic/supply?mosaicId=${encodeURIComponent(qualified)}`,
+);
+
+const lookup = {
+  [qualified]: { supply: BigInt(supply.supply), divisibility },
+};
+
+// amountは倍率1、添付数量100は1.00モザイクを表す。
+const mosaic = new descriptors.SizePrefixedMosaicDescriptor(
+  new descriptors.MosaicDescriptor(
+    new descriptors.MosaicIdDescriptor(
+      new descriptors.NamespaceIdDescriptor(namespace),
+      name,
+    ),
+    new models.Amount(100n),
+  ),
+);
+
+const tx = facade.createTransactionFromTypedDescriptor(
+  new descriptors.TransferTransactionV2Descriptor(
+    bob.address,
+    new models.Amount(1_000_000n),
+    undefined,
+    [mosaic],
+  ),
+  alice.publicKey,
+  0n,
+  7200,
+);
+
+tx.fee = new models.Amount(calculateTransactionFee(tx, lookup));
+
+const signature = alice.signTransaction(tx);
+
+if (!facade.verifyTransaction(tx, signature))
+  throw new Error('署名検証に失敗しました');
+
+console.log(TransactionFactory.attachSignature(tx, signature));
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/mosaic/transfer_mosaic.py"
+import os
+import requests
+from urllib.parse import urlencode, quote
+from symbolchain import nc
+from symbolchain.facade.NemFacade import NemFacade
+from symbolchain.nem.FeeCalculator import calculate_transaction_fee
+from symbolchain.nem.TransactionFactory import TransactionFactory
+from accounts.key_store import alice, bob
+
+facade = NemFacade('testnet')
+
+
+# requests の JSON decoder は整数を Python の int として保持する。
+def get(path):
+    node = os.environ['NEM_NODE'].rstrip('/')
+    response = requests.get(node + path, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+
+namespace = os.environ['NEM_NAMESPACE']
+name = os.environ['NEM_MOSAIC']
+
+# 定義は複数ページになるので、meta.idをカーソルにして目的の名前を探す。
+cursor = None
+definition = None
+while definition is None:
+    query = {'namespace': namespace}
+    if cursor is not None:
+        query['id'] = cursor
+    result = get('/namespace/mosaic/definition/page?' + urlencode(query))
+    definition = next(
+        (
+            entry['mosaic']
+            for entry in result['data']
+            if entry['mosaic']['id']['name'] == name
+        ),
+        None,
+    )
+    if definition is not None:
+        break
+    if not result['data']:
+        raise ValueError('モザイク定義が見つかりません')
+    next_cursor = result['data'][-1]['meta']['id']
+    if next_cursor == cursor:
+        raise ValueError('定義のページングが進みません')
+    cursor = next_cursor
+qualified = f'{namespace}:{name}'
+supply = get('/mosaic/supply?mosaicId=' + quote(qualified, safe=''))
+divisibility = int(
+    next(
+        p['value']
+        for p in definition['properties']
+        if p['name'] == 'divisibility'
+    )
+)
+lookup = {
+    qualified: {'supply': supply['supply'], 'divisibility': divisibility}
+}
+
+# amountは倍率1、添付数量100は1.00モザイクを表す。
+tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'transfer_transaction_v2',
+        'recipient_address': bob.address,
+        'amount': 1_000_000,
+        'mosaics': [
+            {
+                'mosaic': {
+                    'mosaic_id': {
+                        'namespace_id': {'name': namespace},
+                        'name': name,
+                    },
+                    'amount': 100,
+                }
+            }
+        ],
+    },
+    alice.public_key,
+    0,
+    7200,
+)
+tx.fee = nc.Amount(calculate_transaction_fee(tx, lookup))
+signature = alice.sign_transaction(tx)
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+print(TransactionFactory.attach_signature(tx, signature))
+```
+
+</TabItem>
+</Tabs>
+
+## 5.4 levyと保有量を確認する
+
+`WITH_LEVY=1` の発行例では、モザイク転送時に送信者から Carol へ0.01 XEMを追加徴収します。
+ブロックの手数料とは別に、levy用の残高も必要です。定額型 `absolute` と、数量に応じる `percentile` があり、
+徴収する資産と受取先は定義中の `levy` を確認します。
+
+| API | 確認する内容 |
+| --- | --- |
+| `GET /namespace/mosaic/definition/page?namespace={name}` | 可分性・所有者・プロパティ・levy |
+| `GET /mosaic/supply?mosaicId={namespace:name}` | 現在の整数単位の供給量 |
+| `GET /account/mosaic/owned?address={address}` | アカウントの最小単位の保有量 |
+
+levy付きの発行を別に試す場合は、別の `NEM_MOSAIC` を設定して初回発行から確認してください。
+
+## 参照資料
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)
+- [NISの供給量API](https://github.com/NemProject/nem/blob/v0.6.102/nis/src/main/java/org/nem/nis/controller/MosaicController.java)
+- [Testnetの登録料受取先](https://github.com/QuantumMechanics/NEM-sdk/blob/master/src/model/sinks.js)

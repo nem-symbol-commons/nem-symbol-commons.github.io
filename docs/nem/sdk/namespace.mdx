@@ -1,0 +1,244 @@
+---
+title: ネームスペース
+description: NEMのルートとサブネームスペースの登録、登録料と更新。
+slug: /nem/sdk/namespace
+sidebar_position: 6
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+ネームスペースはモザイクを発行するための名前空間です。ルートを取得し、その配下にサブネームスペースを作れます。
+NEMのネームスペースはアドレスやモザイクへのエイリアスではありません。
+
+## 6.1 ルートを取得する
+
+`NEM_NAMESPACE` に未使用のルート名を設定します。例の値は自分用の名前へ置き換えてください。
+小文字の英数字、`-`、`_` を使い、先頭や長さなどの制約も満たす必要があります。
+
+```bash
+export NEM_NAMESPACE='nem-learn-demo'
+```
+
+SDK 3.3.3 が返すルートの登録料は100 XEM、サブの登録料は10 XEMです。
+これらとトランザクション手数料は別に支払います。登録料の受取先はネットワークで決まります。
+以下はNEM Testnetの受取先です。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/namespace/register-namespace.ts"
+import {
+  Address,
+  calculateNamespaceRentalFee,
+  NemFacade,
+  descriptors,
+  models,
+  calculateTransactionFee,
+  TransactionFactory,
+} from 'symbol-sdk/nem';
+import { alice } from '../accounts/key-store.js';
+
+const facade = new NemFacade('testnet');
+
+const name = process.env.NEM_NAMESPACE;
+
+if (!name || !/^[a-z][a-z0-9_-]{0,15}$/.test(name))
+  throw new Error('有効なルート名を設定してください');
+
+// parentNameを省略するとルートの登録になる。期間は任意指定しない。
+const descriptor =
+  new descriptors.NamespaceRegistrationTransactionV1Descriptor(
+    new Address('TAMESPACEWH4MKFMBCVFERDPOOP4FK7MTDJEYP35'),
+    new models.Amount(calculateNamespaceRentalFee(true)),
+    name,
+  );
+
+const tx = facade.createTransactionFromTypedDescriptor(
+  descriptor,
+  alice.publicKey,
+  0n,
+  7200,
+);
+
+// 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = new models.Amount(calculateTransactionFee(tx));
+
+const signature = alice.signTransaction(tx);
+
+if (!facade.verifyTransaction(tx, signature))
+  throw new Error('署名検証に失敗しました');
+
+const body = TransactionFactory.attachSignature(tx, signature);
+
+console.log(body);
+
+console.log('hash:', facade.hashTransaction(tx).toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/namespace/register_namespace.py"
+import os
+import re
+from symbolchain.nem.Network import Address
+from symbolchain.nem.FeeCalculator import calculate_namespace_rental_fee
+from symbolchain import nc
+from symbolchain.facade.NemFacade import NemFacade
+from symbolchain.nem.FeeCalculator import calculate_transaction_fee
+from symbolchain.nem.TransactionFactory import TransactionFactory
+from accounts.key_store import alice
+
+facade = NemFacade('testnet')
+
+name = os.environ['NEM_NAMESPACE']
+if not re.fullmatch(r'[a-z][a-z0-9_-]{0,15}', name):
+    raise ValueError('有効なルート名を設定してください')
+
+# parent_nameを省略するとルートの登録になる。期間は任意指定しない。
+tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'namespace_registration_transaction_v1',
+        'name': name,
+        'rental_fee_sink': Address(
+            'TAMESPACEWH4MKFMBCVFERDPOOP4FK7MTDJEYP35'
+        ),
+        'rental_fee': calculate_namespace_rental_fee(True),
+    },
+    alice.public_key,
+    0,
+    7200,
+)
+
+# 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = nc.Amount(calculate_transaction_fee(tx))
+signature = alice.sign_transaction(tx)
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+body = TransactionFactory.attach_signature(tx, signature)
+print(body)
+print('hash:', facade.hash_transaction(tx))
+```
+
+</TabItem>
+</Tabs>
+
+ルートのレンタル期間は約1年です。取り込み後に `GET /namespace?namespace={name}` で所有者と取得高を確認します。
+期限前の更新可能期間（約1か月前から）に、同じ所有者がルートを再登録することで延長できます。再実行が単なる再送なのか延長なのかを区別し、
+所有状態と履歴を確認してから更新してください。
+
+## 6.2 サブネームスペースを取得する
+
+ルートの取り込み後、子の `voucher` を登録します。完全名は `{NEM_NAMESPACE}.voucher` になります。
+子の有効性は親に依存し、親の期限管理が必要です。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/namespace/register-subnamespace.ts"
+import {
+  Address,
+  calculateNamespaceRentalFee,
+  NemFacade,
+  descriptors,
+  models,
+  calculateTransactionFee,
+  TransactionFactory,
+} from 'symbol-sdk/nem';
+import { alice } from '../accounts/key-store.js';
+
+const facade = new NemFacade('testnet');
+
+const parent = process.env.NEM_NAMESPACE;
+
+if (!parent) throw new Error('NEM_NAMESPACE が必要です');
+
+// 子の部分だけをnameに、取得済みの親名をparentNameに渡す。
+const tx = facade.createTransactionFromTypedDescriptor(
+  new descriptors.NamespaceRegistrationTransactionV1Descriptor(
+    new Address('TAMESPACEWH4MKFMBCVFERDPOOP4FK7MTDJEYP35'),
+    new models.Amount(calculateNamespaceRentalFee(false)),
+    'voucher',
+    parent,
+  ),
+  alice.publicKey,
+  0n,
+  7200,
+);
+
+// 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = new models.Amount(calculateTransactionFee(tx));
+
+const signature = alice.signTransaction(tx);
+
+if (!facade.verifyTransaction(tx, signature))
+  throw new Error('署名検証に失敗しました');
+
+const body = TransactionFactory.attachSignature(tx, signature);
+
+console.log(body);
+
+console.log('hash:', facade.hashTransaction(tx).toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/namespace/register_subnamespace.py"
+import os
+from symbolchain.nem.Network import Address
+from symbolchain.nem.FeeCalculator import calculate_namespace_rental_fee
+from symbolchain import nc
+from symbolchain.facade.NemFacade import NemFacade
+from symbolchain.nem.FeeCalculator import calculate_transaction_fee
+from symbolchain.nem.TransactionFactory import TransactionFactory
+from accounts.key_store import alice
+
+facade = NemFacade('testnet')
+
+# 子の部分だけをnameに、取得済みの親名をparent_nameに渡す。
+tx = facade.create_transaction_from_descriptor(
+    {
+        'type': 'namespace_registration_transaction_v1',
+        'name': 'voucher',
+        'parent_name': os.environ['NEM_NAMESPACE'],
+        'rental_fee_sink': Address(
+            'TAMESPACEWH4MKFMBCVFERDPOOP4FK7MTDJEYP35'
+        ),
+        'rental_fee': calculate_namespace_rental_fee(False),
+    },
+    alice.public_key,
+    0,
+    7200,
+)
+
+# 手数料を確定してから署名する。署名後に金額や期限を変更しない。
+tx.fee = nc.Amount(calculate_transaction_fee(tx))
+signature = alice.sign_transaction(tx)
+if not facade.verify_transaction(tx, signature):
+    raise ValueError('署名検証に失敗しました')
+
+body = TransactionFactory.attach_signature(tx, signature)
+print(body)
+print('hash:', facade.hash_transaction(tx))
+```
+
+</TabItem>
+</Tabs>
+
+| API | 確認する内容 |
+| --- | --- |
+| `GET /namespace?namespace={name}` | 完全名・所有者・取得高 |
+| `GET /account/namespace/page?address={address}` | 所有する名前とページング用ID |
+
+モザイク名はこの名前空間に属します。期限切れによるモザイクへの影響も考慮してルートを更新してください。
+
+## 参照資料
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)
+- [Testnetの登録料受取先](https://github.com/QuantumMechanics/NEM-sdk/blob/master/src/model/sinks.js)

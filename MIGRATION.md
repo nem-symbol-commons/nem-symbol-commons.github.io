@@ -15,7 +15,7 @@
 | `docs-sym/symbol-sdk-symbol/03_アカウント.mdx` | [docs/symbol/sdk/accounts.mdx](docs/symbol/sdk/accounts.mdx) |
 | `docs-sym/symbol-sdk-symbol/04_学習用アカウントの準備.mdx` | [docs/symbol/sdk/learning-accounts.mdx](docs/symbol/sdk/learning-accounts.mdx) |
 | `docs-sym/symbol-sdk-symbol/05_トランザクション.mdx` | [docs/symbol/sdk/transactions.mdx](docs/symbol/sdk/transactions.mdx) |
-| `docs-nem/memo/nem-webscoket.mdx` | [docs/nem/websocket.mdx](docs/nem/websocket.mdx) |
+| `docs-nem/memo/nem-webscoket.mdx` | [監視のWebSocket通知](docs/nem/sdk/observer.mdx#93-websocket通知) |
 | `docs-nem/nem-node-setup/NEM_NIS1_ノードのセットアップ.mdx` | [docs/node-operation/nem/setup.mdx](docs/node-operation/nem/setup.mdx) |
 | `docs-nem/nem-node-setup/NEM_NIS1_ノードのビルド.mdx` | [docs/node-operation/nem/build.mdx](docs/node-operation/nem/build.mdx) |
 | `docs-nem/nem-node-setup/NEMスーパーノードプログラム.mdx` | [docs/node-operation/nem/supernode.mdx](docs/node-operation/nem/supernode.mdx) |

@@ -1,0 +1,248 @@
+---
+title: アカウント
+description: NEMの鍵と40文字のアドレス、復元、公開アカウント、残高の取得。
+slug: /nem/sdk/accounts
+sidebar_position: 2
+tags:
+- NEMSDK
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+秘密鍵から公開鍵を、公開鍵からアドレスを計算します。NEMのアドレスは40文字です。
+NEM Testnet と Symbol Testnet はどちらも `T` で始まりますが、アドレス形式と鍵の扱いは異なります。
+NEMの鍵は `NemFacade` で処理してください。
+
+## 2.1 アカウントを生成する
+
+暗号学的にランダムな秘密鍵からアカウントを作成します。秘密鍵は表示せず、公開鍵とアドレスだけを確認します。
+保存しないため、再実行すると別のアカウントになります。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/create-account.ts"
+import { PrivateKey } from 'symbol-sdk';
+import { NemFacade } from 'symbol-sdk/nem';
+
+// NEM用の鍵導出とアドレス生成を使う。
+const facade = new NemFacade('testnet');
+
+const account = facade.createAccount(PrivateKey.random());
+
+console.log('publicKey:', account.publicKey.toString());
+
+console.log('address:', account.address.toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/create_account.py"
+from symbolchain.CryptoTypes import PrivateKey
+from symbolchain.facade.NemFacade import NemFacade
+
+# NEM用の鍵導出とアドレス生成を使う。
+facade = NemFacade('testnet')
+account = facade.create_account(PrivateKey.random())
+
+print('publicKey:', account.public_key)
+print('address:', account.address)
+```
+
+</TabItem>
+</Tabs>
+
+```bash
+# TypeScript
+npx tsc
+node dist/accounts/create-account.js
+
+# Python
+PYTHONPATH=src python src/accounts/create_account.py
+```
+
+ネットワークへの登録操作は不要です。新しいアドレスはローカルで生成できます。
+同じアカウントを後の操作でも使うため、[学習用アカウントの準備](learning-accounts.mdx)でニーモニックを保存します。
+
+## 2.2 既存の秘密鍵から復元する
+
+自分が管理するNEM Testnet専用の64桁の秘密鍵を、プロジェクトルートの `.nem-testnet-private-key` に保存します。
+ファイルを `.gitignore` に追加し、所有者だけが読める権限にしてください。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/restore-account.ts"
+import { readFileSync } from 'node:fs';
+import { PrivateKey } from 'symbol-sdk';
+import { NemFacade } from 'symbol-sdk/nem';
+
+// NEM用の秘密鍵表現をそのまま渡す。独自にバイト順を反転しない。
+const facade = new NemFacade('testnet');
+
+const key = new PrivateKey(
+  readFileSync('.nem-testnet-private-key', 'utf8').trim(),
+);
+
+console.log(facade.createAccount(key).address.toString());
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/restore_account.py"
+from pathlib import Path
+from symbolchain.CryptoTypes import PrivateKey
+from symbolchain.facade.NemFacade import NemFacade
+
+# NEM用の秘密鍵表現をそのまま渡す。独自にバイト順を反転しない。
+facade = NemFacade('testnet')
+key = PrivateKey(
+    Path('.nem-testnet-private-key').read_text(encoding='utf8').strip()
+)
+print(facade.create_account(key).address)
+```
+
+</TabItem>
+</Tabs>
+
+NEM SDK内部では鍵表現の変換を行います。アプリ側で反転を加えると別の鍵になります。
+既存ウォレットと照合する場合は公開鍵とアドレスの両方を確認してください。
+
+## 2.3 公開鍵からアドレスを確認する
+
+公開鍵だけのアカウントでは署名できません。受信者のアドレスの導出と検査に使えます。
+以下は学習用の Bob の公開鍵を使います。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/public-account.ts"
+import { NemFacade } from 'symbol-sdk/nem';
+import { bob } from './key-store.js';
+
+// 公開鍵からNEM Testnetのアドレスを導出して検査する。
+const facade = new NemFacade('testnet');
+
+const account = facade.createPublicAccount(bob.publicKey);
+
+console.log(account.address.toString());
+
+console.log(facade.network.isValidAddressString(account.address.toString()));
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/public_account.py"
+from symbolchain.facade.NemFacade import NemFacade
+from accounts.key_store import bob
+
+# 公開鍵からNEM Testnetのアドレスを導出して検査する。
+facade = NemFacade('testnet')
+account = facade.create_public_account(bob.public_key)
+print(account.address)
+print(facade.network.is_valid_address_string(str(account.address)))
+```
+
+</TabItem>
+</Tabs>
+
+## 2.4 残高を取得する
+
+[接続確認](../testnet-connection.md)で選んだNISのURLを指定します。
+
+```bash
+export NEM_NODE='http://libertalia.nemtest.net:7890'
+```
+
+NISのJSONには64ビット整数が数値で入ります。TypeScriptでは `response.json()` で精度を失う前に、応答テキストを `json-bigint` で読み取ります。
+大きな値は `bigint`、小さな値は `number` になるため、金額は `BigInt(value)` で統一します。Pythonの整数は `int` で保持されます。
+
+<Tabs groupId="language">
+<TabItem value="ts" label="TypeScript">
+
+```ts title="src/accounts/account-info.ts"
+import JSONBig from 'json-bigint';
+import { alice } from './key-store.js';
+
+const node = process.env.NEM_NODE?.replace(/\/$/, '');
+
+const json = JSONBig({ useNativeBigInt: true });
+
+// 数値の桁を失わないよう、JSON.parseではなく64ビット対応のparserを使う。
+async function get(path: string) {
+  if (!node)
+    throw new Error('NEM_NODE に NIS Testnet の REST URL を設定してください');
+  const response = await fetch(`${node}${path}`, {
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
+  return json.parse(await response.text());
+}
+
+// NISが同期済みのTestnetノードであることを確認する。
+const info = await get('/node/info');
+
+const status = await get('/status');
+
+if (
+  ![-104, 152].includes(Number(info.metaData.networkId)) ||
+  Number(status.code) !== 6
+) {
+  throw new Error('同期済みの NEM Testnet ノードではありません');
+}
+
+// XEMの可分性は6。小数にせず最小単位の残高を表示する。
+const state = await get(`/account/get?address=${alice.address}`);
+
+console.log('balanceAtomic:', BigInt(state.account.balance).toString());
+
+console.log(
+  'vestedBalanceAtomic:',
+  BigInt(state.account.vestedBalance).toString(),
+);
+```
+
+</TabItem>
+<TabItem value="py" label="Python">
+
+```py title="src/accounts/account_info.py"
+import os
+import requests
+from accounts.key_store import alice
+
+
+# requests の JSON decoder は整数を Python の int として保持する。
+def get(path):
+    node = os.environ['NEM_NODE'].rstrip('/')
+    response = requests.get(node + path, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+
+# NISが同期済みのTestnetノードであることを確認する。
+info = get('/node/info')
+status = get('/status')
+if info['metaData']['networkId'] not in (-104, 152) or status['code'] != 6:
+    raise ValueError('同期済みの NEM Testnet ノードではありません')
+
+# XEMの可分性は6。小数にせず最小単位の残高を表示する。
+state = get(f'/account/get?address={alice.address}')
+print('balanceAtomic:', state['account']['balance'])
+print('vestedBalanceAtomic:', state['account']['vestedBalance'])
+```
+
+</TabItem>
+</Tabs>
+
+`balance` と `vestedBalance` はXEMの最小単位です。`1_000_000` が1 XEMになります。
+`vestedBalance` はハーベスティングの適格性に関係する残高で、総残高とは異なります。
+通常の転送は[トランザクション](transactions.mdx)で作成します。
+
+## 参照資料
+
+- [NEM SDK 3.3.3 の公式実装](https://github.com/symbol/symbol/tree/7c5bd51293c1202701d10daf2afcb6c060e45c30/sdk)
+- [NIS API](https://nemproject.github.io/)
