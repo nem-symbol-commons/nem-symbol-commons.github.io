@@ -1,24 +1,31 @@
 ---
-title: NEMスーパーノードプログラム登録（旧手順）
-description: NIS1 スーパーノード登録の過去の運用メモ。参加条件は別途確認が必要です。
+title: NEM スーパーノードプログラムへの登録
+description: NIS1 の委任設定、Servant の導入とスーパーノードプログラムへの登録。
 slug: /node-operation/nem/supernode
-sidebar_position: 3
+sidebar_position: 4
 tags:
-- NEM
-- NIS1
-- Node
-- Supernode
+  - NEM
+  - NIS1
+  - Node
+  - Supernode
 ---
 
-:::note[移行記事]
+NIS1 ノードに Servant を導入し、スーパーノードプログラムへ登録します。[NIS1 のセットアップ](./setup.mdx)を済ませ、参加条件や登録先は[公式のスーパーノードガイド](https://docs.nemtest.net/en/userbook/node/supernode-program/)で確認してください。
 
-2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
-移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
-対象バージョンや検証状況を本文で確認してください。
+設定例の `YOUR_NODE_DOMAIN_OR_IP` はノードのドメイン名または IP アドレス、`YOUR_DELEGATED_PRIVATE_KEY` は委任用アカウントの秘密鍵に置き換えます。
 
-:::
+## 必要パッケージと作業ユーザー
 
-これは旧原稿に記載されていた参加手順の記録です。残高条件、報酬、募集期間、登録先、ウォレット画面は移行時に現行確認していません。現在の参加条件を確認してから利用してください。
+Ubuntu 26.04 LTS（amd64）で、セットアップ記事と同じ作業ユーザーを使います。Servant の設定ファイルの所有者とサービス実行ユーザーも、このユーザーにそろえます。
+
+```bash
+sudo apt update
+sudo apt install curl jq unzip
+```
+
+Java 11 は[セットアップ記事](./setup.mdx#必要パッケージと作業ユーザー)で導入済みとします。サービスでも同じ Java 11 を指定します。
+
+Servant の導入とプログラムへの登録に進む前に、[NIS1 の同期状況](./setup.mdx#synchronization)を確認してください。
 
 ## アカウントのデリゲート有効化
 
@@ -26,36 +33,28 @@ NEM ウォレットで「デリゲートアカウント管理」（サービス 
 リモートステータスが「無効」の場合は、「デリゲートアカウントの有効化/無効化」ボタンを押して有効化します（手数料 0.15 XEM）。
 有効化には約 6 時間かかりますが、その間に他の作業を進めても問題ありません。
 
-## 委任秘密鍵の取得
+委任秘密鍵は、セットアップ記事の[委任秘密鍵を確認する](./setup.mdx#委任秘密鍵を確認する)に沿って取得してください。
 
-「デリゲートアカウントのキーを表示する」ボタンを押します。
-ウォレットのパスワードを入力し、＋ボタンで秘密鍵を表示します。
+## NIS1 クライアントの委任秘密鍵を確認する
 
-## NIS1 クライアントに委任秘密鍵を設定
-
-### NIS1 クライアントの停止
-
-NIS1 クライアントが稼働中の場合は停止します。
+セットアップ時に設定した `nis.bootKey` が、今回使う委任秘密鍵と一致することを確認します。
 
 ```bash
-sudo systemctl stop nis1
-```
-
-### 委任秘密鍵を設定
-
-```bash
+chmod 600 /opt/nis1/nis/config-user.properties
 vi /opt/nis1/nis/config-user.properties
 ```
 
-ファイルの末尾に次の内容を追加します。
+今回使う委任秘密鍵が設定済みなら、変更や再起動は不要です。
 
 ```ini title="/opt/nis1/nis/config-user.properties"
-nis.bootKey = <委任秘密鍵>
+nis.bootKey = YOUR_DELEGATED_PRIVATE_KEY
 ```
 
-### NIS1 クライアントの開始
+未設定、または別の鍵が設定されている場合は、NIS1 クライアントを停止してから `nis.bootKey` を追加・変更します。既存の項目と重複させないでください。
 
 ```bash
+sudo systemctl stop nis1
+vi /opt/nis1/nis/config-user.properties
 sudo systemctl start nis1
 ```
 
@@ -63,11 +62,11 @@ sudo systemctl start nis1
 
 ### Servant をダウンロード
 
-NIS1 クライアントのビルド済みバージョンは、下記のリンクから最新版を確認できます。
+Servant の配布ファイルは、下記のリンクから確認できます。
 
 [https://bob.nem.ninja/](https://bob.nem.ninja/)
 
-2024/11/11 時点の最新は`v0.0.4`。
+以下は Servant `v0.0.4` の例です。
 
 ```bash
 curl -OL https://bob.nem.ninja/servant_0_0_4.zip
@@ -80,26 +79,28 @@ unzip servant_0_0_4.zip
 rm servant_0_0_4.zip
 ```
 
-servant ディレクトリを nis1 と同じ場所（/opt など）に配置します。
+`servant` ディレクトリを `nis1` と同じ場所（`/opt` など）に配置します。
 
 ```bash
 sudo mv servant /opt
+sudo chown -R "$(id -un):$(id -gn)" /opt/servant
 cd /opt/servant
 ```
 
 ### Servant の設定
 
 ```bash
+chmod 600 config.properties
 vi config.properties
 ```
 
-`nem.host`にホスト名または IP アドレスを設定します。
-`servant.key`に委任秘密鍵を設定します。
+委任秘密鍵を保存するため、`config.properties` は実行ユーザーだけが読み書きできる `600` に制限します。
+
+既存の `nem.host` と `servant.key` を次のように変更します。その他の設定は残してください。
 
 ```ini title="config.properties"
-nem.host = <put vps ip address here>
-...
-servant.key = <委任秘密鍵>
+nem.host = YOUR_NODE_DOMAIN_OR_IP
+servant.key = YOUR_DELEGATED_PRIVATE_KEY
 ```
 
 ## ポート開放
@@ -112,6 +113,8 @@ sudo ufw allow 7880
 
 ### サービスファイルの作成
 
+`YOUR_SERVICE_USER`・`YOUR_SERVICE_GROUP` は、作業ユーザーの `whoami`・`id -gn` で確認したユーザー名・グループ名に置き換えます。
+
 ```bash
 sudo vi /etc/systemd/system/nis1-servant.service
 ```
@@ -122,11 +125,11 @@ Description=NIS1 Servant
 After=network.target
 
 [Service]
-ExecStart=java -Xms256M -Xmx256M -XX:+UseG1GC -cp ".:jars/*" org.nem.rewards.servant.NodeRewardsServant
+ExecStart=/usr/lib/jvm/java-11-openjdk-amd64/bin/java -Xms256M -Xmx256M -XX:+UseG1GC -cp ".:jars/*" org.nem.rewards.servant.NodeRewardsServant
 Restart=on-failure
 RestartSec=2
-User=<実行ユーザー名>
-Group=<実行ユーザー名>
+User=YOUR_SERVICE_USER
+Group=YOUR_SERVICE_GROUP
 StandardOutput=journal
 StandardError=journal
 WorkingDirectory=/opt/servant
@@ -162,17 +165,25 @@ sudo systemctl enable nis1-servant
 
 ## スーパーノードプログラムへの登録
 
+[同期完了](./setup.mdx#synchronization)と NIS1・Servant の稼働を確認してから登録します。
+
+### 初回登録
+
 NEM ウォレットの「NEM スーパーノードプログラム」画面を開きます。
 （サービス → NEM スーパーノードプログラム）
 
 「プログラムへの参加」タブを押します。
 
-- 参加アドレス: 毎月発表される enrollment address
+- 参加アドレス: [cryptoBeliever_ の X アカウント](https://x.com/cryptoBeliever_)で毎月発表される enrollment address
 - ノード主: 自分のノードのホスト名または IP アドレス
 
 パスワードを入力し、「プログラムへの参加」ボタンを押します。
 
 登録先はプログラム運営元の告知で確認してください。SNS の検索結果だけで送信先を決定しないでください。
+
+### 毎月の再登録
+
+参加を継続するには、**毎月の再登録が必要**です。翌月分の受付は当月末の 4 日前に始まります。毎月の告知で新しい参加アドレスと対象月を確認し、上記の登録操作を繰り返してください。前月のアドレスは使い回しません。[公式の再登録説明](https://docs.nemtest.net/en/userbook/node/supernode-program/#monthly-re-enrollment)を参照してください。
 
 ## 確認
 

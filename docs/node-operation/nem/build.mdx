@@ -1,30 +1,30 @@
 ---
 title: NEM(NIS1)ノードのビルド
-description: Ubuntu 24 での NIS1 v0.6.102 のビルドメモ。
+description: Ubuntu 26.04 LTS での NIS1 v0.6.102 のビルド手順。
 slug: /node-operation/nem/build
 sidebar_position: 2
 tags:
-- NEM
-- NIS1
-- Node
+  - NEM
+  - NIS1
+  - Node
 ---
 
-:::note[移行記事]
-
-2025 年までの旧 nemnesia 原稿を Commons のカテゴリへ移行しました。
-移行時にはリンクと構文を調整していますが、特記のない構築・運用手順の再実行は未確認です。
-対象バージョンや検証状況を本文で確認してください。
-
-:::
-
-このページでは、NEM(NIS1)ノードを Ubuntu 24 でビルドする手順を説明します。
+NEM(NIS1)ノードを Ubuntu 26.04 LTS（amd64）でビルドします。
 ビルド済みノードが公開されていない場合や、自分でビルドしたい場合に役立ちます。
+配布済みの NIS1 をコンテナーで動かす場合は、[Docker イメージの作成と起動](./docker.mdx)を参照してください。
 
-## Java と Maven のインストール
+## 必要パッケージのインストール
 
 ```bash
-sudo apt install openjdk-11-jdk maven
+sudo apt update
+sudo apt install openjdk-11-jdk-headless maven git
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+export PATH="$JAVA_HOME/bin:$PATH"
+java -version
+mvn -version
 ```
+
+Ubuntu の [OpenJDK 11](https://packages.ubuntu.com/resolute/openjdk-11-jdk-headless) と [Maven](https://packages.ubuntu.com/resolute/maven)（いずれも universe）を使います。`java -version` と `mvn -version` の Java が両方とも `11` 系であることを確認し、以降も同じシェルで作業します。
 
 ## ソースコードのクローン
 
@@ -54,3 +54,6 @@ sed -i 's/nem\.network = \r/nem.network = mainnet/g' package/nis/config.properti
 ## 任意の場所に配置
 
 `nis1/infra/package` ディレクトリを任意の場所に移動します。
+以降の配置・所有権・起動確認は[セットアップ記事](./setup.mdx#配置場所)に沿って進めてください。
+
+**Testnet では `nem.network` の変更だけでは不十分です。** 起動前に、セットアップ記事の[Testnet 設定](./setup.mdx#testnet-config)にあるフォーク設定も必ず適用してください。[公式の Testnet 構成例](https://docs.nemtest.net/en/userbook/node/install/#configuration)を参照してください。

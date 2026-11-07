@@ -1,0 +1,175 @@
+---
+title: NEM(NIS1)ノードを Docker で動かす
+description: Ubuntu 26.04 LTS で NIS1 v0.6.102 の Docker イメージを作成し、Compose で運用します。
+slug: /node-operation/nem/docker
+sidebar_position: 3
+tags:
+  - NEM
+  - NIS1
+  - Docker
+---
+
+Ubuntu 26.04 LTS（amd64）で、[NIS v0.6.102 の配布ファイル](https://github.com/NemProject/nem/releases/tag/v0.6.102)から Docker イメージを作ります。ホストへの Java の導入は不要です。
+公式の [nem-docker](https://github.com/NemProject/nem-docker) はアーカイブ済みのため、ここでは Java 11 の [Eclipse Temurin](https://hub.docker.com/_/eclipse-temurin) と Compose を使います。Servant の導入は含みません。
+
+## 作業環境を用意する
+
+[Docker のインストール](../../development-tools/docker.mdx)を済ませ、root 以外の作業ユーザーで `docker compose` を実行できることを確認します。メモリ・ディスクは[公式のノード要件](https://docs.nemtest.net/en/userbook/node/install/#hardware-requirements)に合わせて用意してください。
+既存の NIS1 が同じホストで稼働している場合は、7890 番ポートやデータを共用しないでください。
+
+```bash
+sudo apt update
+sudo apt install curl jq
+mkdir ~/nis1-docker
+cd ~/nis1-docker
+umask 077
+mkdir image
+curl -fL https://github.com/NemProject/nem/releases/download/v0.6.102/nis-0.6.102.tgz \
+  -o image/nis-0.6.102.tgz
+```
+
+`image/` はイメージ作成用です。設定や秘密鍵は置きません。
+
+## イメージを作成する
+
+次の内容を `image/Dockerfile` に保存します。
+
+```dockerfile title="image/Dockerfile"
+FROM eclipse-temurin:11-jre-resolute
+ADD nis-0.6.102.tgz /opt/
+RUN mv /opt/package /opt/nis1 && chmod -R a+rX /opt/nis1
+WORKDIR /opt/nis1/nis
+ENV JAVA_TOOL_OPTIONS="-Xms4G -Xmx6G"
+USER 1000:1000
+ENTRYPOINT ["java", "-cp", ".:./*:../libs/*", "org.nem.deploy.CommonStarter"]
+```
+
+[配布版の起動スクリプト](https://github.com/NemProject/nem/blob/v0.6.102/infra/package/nix.runNis.sh)と同じクラスを、コンテナーの主プロセスとして直接実行します。
+ヒープの初期値は 4 GB、最大値は 6 GB の例です。OS や Java のヒープ以外の使用量も残せるよう、マシンのメモリに合わせて調整してください。
+
+`~/nis1-docker` でイメージをビルドします。
+
+```bash
+docker build --platform linux/amd64 -t local/nis1:0.6.102 ./image
+```
+
+## 起動の準備をする
+
+### 設定とデータの保存先を用意する
+
+同じ作業ディレクトリで、設定用の `config/` と DB・ログの永続化先 `nem/` を作ります。`.env` には作業ユーザーの UID/GID を保存します。
+
+次のコマンドで確認できます。`id -u` の数値が `NIS_UID`、`id -g` の数値が `NIS_GID` です。
+
+```bash
+id -u
+id -g
+```
+
+以下の `printf` は、その数値を取得して `.env` に保存します。
+
+```bash
+umask 077
+mkdir config nem
+printf 'NIS_UID=%s\nNIS_GID=%s\n' "$(id -u)" "$(id -g)" > .env
+```
+
+### ノードを設定する
+
+[委任秘密鍵を確認](./setup.mdx#委任秘密鍵を確認する)してから、設定ファイルを作ります。
+
+```bash
+touch config/config-user.properties
+chmod 600 config/config-user.properties
+vi config/config-user.properties
+```
+
+次は Mainnet の例です。`YOUR_NODE_DOMAIN_OR_IP`・`YOUR_NODE_NAME`・`YOUR_DELEGATED_PRIVATE_KEY` を実際の値に置き換えます。資産を持つ主アカウントの秘密鍵は使わないでください。
+
+```ini title="config/config-user.properties"
+nem.network = mainnet
+nem.folder = /var/lib/nem
+nem.host = YOUR_NODE_DOMAIN_OR_IP
+nis.bootName = YOUR_NODE_NAME
+nis.bootKey = YOUR_DELEGATED_PRIVATE_KEY
+nis.ipDetectionMode = Disabled
+nis.unlockedLimit = 10
+```
+
+**Testnet は `nem.network = testnet` にするだけでは不十分です。** [セットアップ記事のフォーク設定](./setup.mdx#testnet-config)も、このファイルに追加してください。`nem.folder` はコンテナー内の `/var/lib/nem` のままにします。
+
+### Compose を設定する
+
+作業ディレクトリ直下に、次のファイルを保存します。
+
+```yaml title="compose.yaml"
+name: nis1
+services:
+  nis:
+    image: local/nis1:0.6.102
+    pull_policy: never
+    platform: linux/amd64
+    user: "${NIS_UID:?NIS_UID を設定してください}:${NIS_GID:?NIS_GID を設定してください}"
+    restart: unless-stopped
+    stop_grace_period: 5m
+    ports:
+      - "7890:7890"
+    volumes:
+      - type: bind
+        source: ./config/config-user.properties
+        target: /opt/nis1/nis/config-user.properties
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./nem
+        target: /var/lib/nem
+        bind:
+          create_host_path: false
+```
+
+`.env` の UID/GID で動かすため、作業ユーザーが所有する `600` の設定を読め、`nem/` へ書き込めます。DB は `nem/nis/data/`、ログは `nem/nis/logs/` に残ります。
+7890/tcp は NIS1 のノード通信・API 用に公開します。VPS やルーター側でも着信を許可し、[Docker のポート公開と UFW の注意点](../../development-tools/docker.mdx#コンテナーのポートを公開する前に)を確認してください。WebSocket を外部提供する場合だけ `7778:7778` を追加します。
+
+`pull_policy: never` により、先ほど作成したローカルイメージを使います。
+
+## 起動して確認する
+
+`~/nis1-docker` で実行します。
+
+```bash
+docker compose config
+docker compose up -d
+docker compose ps
+docker compose logs --tail=100 nis
+```
+
+ノードの API 応答を確認します。
+
+```bash
+curl -fsS http://127.0.0.1:7890/heartbeat | jq
+curl -fsS http://127.0.0.1:7890/node/info | jq
+curl -fsS http://127.0.0.1:7890/chain/height | jq
+```
+
+`heartbeat` は正常時に `code: 1`・`message: "ok"` を返します。`node/info` のノード名・公開ホスト名を確認し、`metaData.networkId` が Mainnet では `104`、Testnet では `-104` であることを確認します。
+API の応答は同期完了を示すものではありません。[同期状況の確認](./setup.mdx#synchronization)に沿って、同じネットワークの他ノードとブロック高を比較してください。
+
+## 停止と再開
+
+```bash
+docker compose stop
+docker compose ps -a
+docker compose logs --tail=100 nis
+```
+
+停止時は主プロセスへ SIGTERM を送り、最大 5 分待ちます。猶予を超えると強制終了されるため、ログで終了処理を確認し、必要に応じて `stop_grace_period` を調整してください。[Compose の停止猶予](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)を参照してください。
+
+再開は次のとおりです。手動停止したコンテナーは、`restart: unless-stopped` があっても OS 再起動だけでは復帰しません。
+
+```bash
+docker compose up -d
+docker compose logs --tail=100 nis
+```
+
+コンテナーを再作成しても、ホストの `config/`・`nem/` は残ります。設定変更や更新の前には停止し、設定・委任秘密鍵・データをバックアップしてください。
