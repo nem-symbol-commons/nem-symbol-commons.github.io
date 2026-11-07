@@ -5,7 +5,7 @@ description: Testnet ノードから情報を取得し、SDK 3.3.3 で転送ト�
 ---
 
 Symbol Testnet に接続し、アカウントの作成から最初の転送までを試します。
-**対象: Linux / macOS / WSL、Node.js `24.18.1`、pnpm、`symbol-sdk@3.3.3`、Symbol Testnet（sai）**。
+**対象: Linux / macOS / WSL、Node.js `24.18.1`、pnpm、`symbol-sdk@3.3.3`、Symbol Testnet(sai)**。
 Mainnet 用の鍵は使いません。コードは既定で送信せず、`--announce` を付けた場合だけ 1 テスト XYM を送信します。
 
 ## 1. 作業ディレクトリを作る

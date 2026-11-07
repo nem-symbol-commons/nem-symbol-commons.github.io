@@ -4,7 +4,7 @@ sidebar_position: 2
 description: NIS1 Testnet の API から情報を取得し、SDK 3.3.3 で XEM 転送をローカル署名して送信します。
 ---
 
-NEM（NIS1）Testnet でアカウント情報の取得と XEM の転送を試します。
+NEM(NIS1)Testnet でアカウント情報の取得と XEM の転送を試します。
 **対象: Linux / macOS / WSL、Node.js `24.18.1`、pnpm、`symbol-sdk@3.3.3` の NEM API、NIS `0.6.102` の公開 Testnet 応答**。
 `symbol-sdk` という名前ですが、ここでは `symbol-sdk/nem` の `NemFacade` を使います。
 Symbol の `PUT /transactions` ではなく、NIS の `POST /transaction/announce` に送ります。

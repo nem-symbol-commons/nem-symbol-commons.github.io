@@ -1,10 +1,10 @@
 ---
 title: NEMとSymbolの違い
 sidebar_position: 2
-description: NEM（NIS1）と Symbol（Catapult）のチェーン、アドレス、API、SDK、機能の違いを整理します。
+description: NEM(NIS1)と Symbol(Catapult)のチェーン、アドレス、API、SDK、機能の違いを整理します。
 ---
 
-NEM（NIS1）と Symbol は、共通する用語を持つ別々のブロックチェーンです。
+NEM(NIS1)と Symbol は、共通する用語を持つ別々のブロックチェーンです。
 NIS1 は NEM のノード実装、Catapult は Symbol のコア実装を指す文脈で使われます。
 Symbol を NIS1 の API 互換サーバーとして扱うことはできません。
 
@@ -12,7 +12,7 @@ Symbol を NIS1 の API 互換サーバーとして扱うことはできませ�
 
 ## 開発で最初に確認する違い
 
-| 項目 | NEM（NIS1） | Symbol |
+| 項目 | NEM(NIS1) | Symbol |
 | --- | --- | --- |
 | ネイティブ通貨 | XEM | XYM |
 | Mainnet の識別子 | `0x68` | `0x68` |

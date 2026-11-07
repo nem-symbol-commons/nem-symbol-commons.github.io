@@ -5,7 +5,7 @@ description: NEM / Symbol の HTTP 接続、主要 API、JSON、整数値、エ�
 ---
 
 REST API は、HTTP を使ってノードの情報を取得したり、署名済みトランザクションを送ったりする入口です。
-NEM（NIS1）と Symbol ではパス、メソッド、JSON の構造が異なります。
+NEM(NIS1)と Symbol ではパス、メソッド、JSON の構造が異なります。
 この記事のコマンドは Linux / macOS / WSL のシェルと `curl` を対象とし、読み取り例には公開 Testnet を使います。
 
 ## URL とメソッド
@@ -22,7 +22,7 @@ Symbol の `7900` は P2P 用で、HTTP の API を呼ぶポートではあり�
 
 ## 主要 API の対応
 
-| 目的 | NEM（NIS1） | Symbol |
+| 目的 | NEM(NIS1) | Symbol |
 | --- | --- | --- |
 | ノード情報 | `GET /node/info` | `GET /node/info` |
 | 起動・同期状態 | `GET /status` | `GET /node/health` |

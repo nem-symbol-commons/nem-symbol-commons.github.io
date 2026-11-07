@@ -15,7 +15,7 @@ API・SDK の仕様、ソースコード、外部ドキュメントを探すた�
 - [SDK](https://docs.symbol.dev/sdk.html): SDK の参照資料。
 - [Symbol のソースコード](https://github.com/symbol/symbol): 実装と変更履歴。
 
-## NEM（NIS1）
+## NEM(NIS1)
 
 - [NEM のソースコード](https://github.com/NemProject/nem): 実装と変更履歴。
 

@@ -4,7 +4,7 @@ sidebar_position: 2
 description: アカウント、鍵、モザイク、ネームスペース、ハーベスト、承認とファイナライズの基礎。
 ---
 
-NEM（NIS1）と Symbol の開発・運用で使う用語をまとめています。
+NEM(NIS1)と Symbol の開発・運用で使う用語をまとめています。
 同じ名前でも仕様が異なるため、両チェーンの違いは [NEMとSymbolの違い](../common/nem-and-symbol.md)を参照してください。
 
 ## アカウントと鍵
@@ -81,7 +81,7 @@ NEM ではモザイクの名前付けに使います。Symbol ではアドレス
 Symbol では、承認とファイナライズを別に確認します。
 REST API の `/chain/info` が返す `latestFinalizedBlock.height` は、そのノードが認識するファイナライズ済みのブロック高です。
 応答の取得と、ファイナライズ証明の独立検証は別の操作です。
-NEM（NIS1）の承認確認には NIS1 の API を使います。
+NEM(NIS1)の承認確認には NIS1 の API を使います。
 
 参照：[Symbol REST OpenAPI](https://symbol.github.io/symbol-openapi/v1.0.4/)、[NEM NIS API](https://nemproject.github.io/)。
 

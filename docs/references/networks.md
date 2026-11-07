@@ -12,10 +12,10 @@ Testnet の再構築時には、Generation Hash Seed、時刻基準、通貨モ�
 
 | チェーン | ネットワーク | 識別子の 1 バイト値 | NIS の networkId 表現 | 通常アドレス | 通貨 |
 | --- | --- | --- | --- | --- | --- |
-| NEM（NIS1） | Mainnet | `0x68` / 104 | 104 | `N` で始まる 40 文字 | XEM |
-| NEM（NIS1） | Testnet | `0x98` / 152 | -104 | `T` で始まる 40 文字 | テスト用 XEM |
+| NEM(NIS1) | Mainnet | `0x68` / 104 | 104 | `N` で始まる 40 文字 | XEM |
+| NEM(NIS1) | Testnet | `0x98` / 152 | -104 | `T` で始まる 40 文字 | テスト用 XEM |
 | Symbol | Mainnet | `0x68` / 104 | 対象外 | `N` で始まる 39 文字 | XYM |
-| Symbol | Testnet（sai） | `0x98` / 152 | 対象外 | `T` で始まる 39 文字 | テスト用 XYM |
+| Symbol | Testnet(sai) | `0x98` / 152 | 対象外 | `T` で始まる 39 文字 | テスト用 XYM |
 
 `0x98` を符号付き 8 ビット整数で表すと `-104` になります。NIS の `metaData.networkId` と SDK のバイト値の表現差に注意してください。
 NEM と Symbol の間で識別子が一致しても、チェーン・アドレス・署名は互換ではありません。
@@ -36,7 +36,7 @@ Epoch Adjustment（Unix 秒）: 1615853185
 通貨モザイク ID: 6BED913FA20223F8
 ```
 
-### Testnet（sai）
+### Testnet(sai)
 
 ```text
 Generation Hash Seed:
@@ -101,8 +101,8 @@ curl --fail-with-body --max-time 15 "$NEM_NODE/status"
 
 | チェーン | ポート | 主な用途 |
 | --- | --- | --- |
-| NEM（NIS1） | TCP 7890 | NIS の HTTP API とノード通信 |
-| NEM（NIS1） | TCP 7778 | WebSocket サービス。提供される場合 |
+| NEM(NIS1) | TCP 7890 | NIS の HTTP API とノード通信 |
+| NEM(NIS1) | TCP 7778 | WebSocket サービス。提供される場合 |
 | Symbol | TCP 7900 | P2P 通信。REST ではない |
 | Symbol | TCP 7902 | Catapult の API サービス。REST Gateway の背後で使い、HTTP REST とは別 |
 | Symbol | TCP 3000 | REST / WebSocket の HTTP / WS 接続の代表例 |

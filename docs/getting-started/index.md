@@ -6,7 +6,7 @@ sidebar_position: 1
 description: NEM / Symbol の開発・運用に役立つ日本語ドキュメント。入門記事、技術分野別の記事、公式資料への入口。
 ---
 
-NEM & Symbol Commons は、NEM（NIS1）と Symbol の開発・運用に役立つ知識を共有する、日本語のドキュメントサイトです。
+NEM & Symbol Commons は、NEM(NIS1)と Symbol の開発・運用に役立つ知識を共有する、日本語のドキュメントサイトです。
 アプリケーション開発やノード運用に取り組む方に向けて、API・SDK の使い方、構築手順、公式仕様や実装へのリンクをまとめています。
 
 ## はじめての方へ
@@ -23,7 +23,7 @@ NEM と Symbol について知るには、[両チェーンの違い](../common/n
 ## 技術分野から探す
 
 - [Symbol](../symbol/index.md)：Symbol 固有の仕様と開発。
-- [NEM（NIS1）](../nem/index.md)：NIS1 固有の仕様と開発。
+- [NEM(NIS1)](../nem/index.md)：NIS1 固有の仕様と開発。
 - [共通技術・比較](../common/index.md)：両チェーンの比較や暗号技術。
 - [ノード運用](../node-operation/index.md)：構築・更新・保守・障害対応。
 - [プロトコル](../protocol/index.md)：P2P 通信、バイナリ形式、ファイナライズ。
@@ -36,7 +36,7 @@ NEM と Symbol について知るには、[両チェーンの違い](../common/n
 
 ## 記事の読み方
 
-NEM（NIS1）と Symbol は別のチェーンです。記事やコード例を使う前に、対象チェーン・ネットワーク・バージョンを確認してください。
+NEM(NIS1)と Symbol は別のチェーンです。記事やコード例を使う前に、対象チェーン・ネットワーク・バージョンを確認してください。
 Testnet の再構築や API の更新後は、リンク先の仕様や実装も確認してください。
 
 リンクの ↗ は外部サイトを示します。

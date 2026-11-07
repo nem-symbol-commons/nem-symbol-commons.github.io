@@ -9,7 +9,7 @@ description: NEM / Symbol の技術資料、実装、SDK、REST API、Explorer�
 
 ## まず選ぶ資料
 
-| 目的 | NEM（NIS1） | Symbol |
+| 目的 | NEM(NIS1) | Symbol |
 | --- | --- | --- |
 | API のパスと JSON を調べる | [NIS API 資料](https://nemproject.github.io/) | [REST OpenAPI v1.0.4](https://symbol.github.io/symbol-openapi/v1.0.4/) |
 | 開発手順・用語を調べる | [NEM Docs](https://docs.nemtest.net/en/) | [Symbol Docs](https://docs.symboltest.net/en/) |
@@ -34,7 +34,7 @@ SDK は主にデータ構築・署名・シリアライズを担います。こ�
 ## ネットワーク設定とノード運用
 
 - [Symbol Mainnet 設定](https://github.com/symbol/networks/blob/mainnet/resources/config-network.properties): Generation Hash Seed、時刻基準、通貨モザイク ID など。
-- [Symbol Testnet（sai）設定](https://github.com/symbol/networks/blob/sai/resources/config-network.properties): Mainnet の値を流用せず、Testnet 用の値を確認します。
+- [Symbol Testnet(sai)設定](https://github.com/symbol/networks/blob/sai/resources/config-network.properties): Mainnet の値を流用せず、Testnet 用の値を確認します。
 - [Shoestring](https://github.com/symbol/product/tree/dev/tools/shoestring): Symbol ノード構築ツールの実装。
 - [Shoestring の構築ガイド](https://docs.symboltest.net/en/userbook/shoestring/quickstart/): `mainnet` / `sai` のパッケージ選択と構築手順。
 - [NIS1 ノード構築ガイド](https://docs.nemtest.net/en/userbook/node/install/): NEM の構築と保守。
