@@ -17,6 +17,8 @@ const config: Config = {
   trailingSlash: false,
   onBrokenLinks: "throw",
   plugins: ["./plugins/article-dates.ts"],
+  markdown: { mermaid: true },
+  themes: ["@docusaurus/theme-mermaid"],
   i18n: {
     defaultLocale: "ja",
     locales: ["ja"],
@@ -39,6 +41,14 @@ const config: Config = {
   ],
   themeConfig: {
     colorMode: { respectPrefersColorScheme: true },
+    mermaid: {
+      theme: { light: "base", dark: "dark" },
+      options: {
+        fontFamily: "var(--ifm-font-family-base)",
+        look: "classic",
+        flowchart: { look: "classic" },
+      },
+    },
     navbar: {
       title: "NEM & Symbol Commons",
       logo: {

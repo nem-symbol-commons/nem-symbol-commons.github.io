@@ -8,6 +8,12 @@
   --ifm-color-primary-lightest: #3b73cf;
   --ifm-code-font-size: 95%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --mermaid-node-bg: #edf3fd;
+  --mermaid-node-border: #8da7cd;
+  --mermaid-surface: #f7f9fc;
+  --mermaid-surface-border: #ced8e7;
+  --mermaid-text: #1c2636;
+  --mermaid-line: #52657e;
 }
 
 [data-theme='dark'] {
@@ -19,4 +25,65 @@
   --ifm-color-primary-lighter: #c0d3f9;
   --ifm-color-primary-lightest: #f0f5fe;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --mermaid-node-bg: #26354d;
+  --mermaid-node-border: #738bad;
+  --mermaid-surface: #202631;
+  --mermaid-surface-border: #46566e;
+  --mermaid-text: #e6edf8;
+  --mermaid-line: #a6b8d1;
+}
+
+/* Mermaid generates SVG rules scoped by ID, so shared overrides need !important. */
+.docusaurus-mermaid-container svg,
+.docusaurus-mermaid-container svg * {
+  filter: none !important;
+  box-shadow: none !important;
+}
+
+.docusaurus-mermaid-container .node rect,
+.docusaurus-mermaid-container .node circle,
+.docusaurus-mermaid-container .node ellipse,
+.docusaurus-mermaid-container .node polygon,
+.docusaurus-mermaid-container .node path {
+  fill: var(--mermaid-node-bg) !important;
+  stroke: var(--mermaid-node-border) !important;
+  stroke-width: 1px !important;
+}
+
+.docusaurus-mermaid-container .node rect {
+  rx: 6px;
+  ry: 6px;
+}
+
+.docusaurus-mermaid-container .cluster rect {
+  fill: var(--mermaid-surface) !important;
+  stroke: var(--mermaid-surface-border) !important;
+  stroke-width: 1px !important;
+  rx: 8px;
+  ry: 8px;
+}
+
+.docusaurus-mermaid-container svg text,
+.docusaurus-mermaid-container .nodeLabel,
+.docusaurus-mermaid-container .edgeLabel,
+.docusaurus-mermaid-container .cluster-label {
+  fill: var(--mermaid-text) !important;
+  color: var(--mermaid-text) !important;
+  font-family: var(--ifm-font-family-base) !important;
+}
+
+.docusaurus-mermaid-container .edgeLabel,
+.docusaurus-mermaid-container .edgeLabel p,
+.docusaurus-mermaid-container .labelBkg {
+  background-color: var(--mermaid-surface) !important;
+  fill: var(--mermaid-surface) !important;
+}
+
+.docusaurus-mermaid-container .flowchart-link {
+  stroke: var(--mermaid-line) !important;
+}
+
+.docusaurus-mermaid-container marker path {
+  fill: var(--mermaid-line) !important;
+  stroke: var(--mermaid-line) !important;
 }
